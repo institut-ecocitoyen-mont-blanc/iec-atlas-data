@@ -22,6 +22,8 @@ export interface GeorisquesData {
   sites: GeorisquesSite[];
   fetchedAt: string | null;
   errors: string[];
+  transport?: "rest" | "wfs";
+  sourceUrls?: string[];
 }
 export function soilRecordColor(site: GeorisquesSite) {
   // Categorical dossier colours, not pollution severity or health thresholds.

@@ -66,3 +66,34 @@ test("bounds concurrency, keeps partial successes and does not timestamp failed 
   assert.equal(data.points[1].seasons[0].fetchedAt, null);
   assert.equal(data.points[1].seasons[1].samples.length, 2);
 });
+
+test("accepts a slow valid page beyond the old 15-second request budget", async (t) => {
+  t.mock.method(AbortSignal, "timeout", (ms) => {
+    const controller = new AbortController();
+    // Model the observed 18-second response without making the test sleep.
+    if (ms < 18000) queueMicrotask(() => controller.abort(new DOMException("Request timeout", "TimeoutError")));
+    return controller.signal;
+  });
+  const data = await loadBathingWater(async (url, { signal }) => {
+    await Promise.resolve(); signal.throwIfAborted();
+    const params = new URL(url).searchParams;
+    return new Response(page(BATHING_SITES.find(s => s.id === params.get("isite")), Number(params.get("annee"))));
+  }, new Date("2026-09-24"));
+  assert.ok(data.points.every(p => p.seasons.every(s => !s.error && s.samples.length === 2)));
+});
+
+test("retries transient HTTP failures but never retries invalid site identity", async () => {
+  const attempts = new Map();
+  const data = await loadBathingWater(async (url) => {
+    const count = (attempts.get(url) ?? 0) + 1; attempts.set(url, count);
+    if (count === 1) return new Response("Temporary failure", { status: 503 });
+    const params = new URL(url).searchParams;
+    return new Response(page(BATHING_SITES.find(s => s.id === params.get("isite")), Number(params.get("annee"))));
+  }, new Date("2026-09-24"));
+  assert.ok(data.points.every(p => p.seasons.every(s => !s.error && s.samples.length === 2)));
+  assert.ok([...attempts.values()].every(n => n === 2));
+  let calls = 0;
+  const invalid = await loadBathingWater(async () => { calls++; return new Response("Wrong site"); }, new Date("2026-09-24"));
+  assert.equal(calls, 6);
+  assert.ok(invalid.points.every(p => p.seasons.every(s => s.error)));
+});

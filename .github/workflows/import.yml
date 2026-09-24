@@ -10,7 +10,7 @@ on:
       mode:
         description: Import group (all forces every source)
         type: choice
-        options: [due, all, hourly, water, annual, georisques]
+        options: [due, all, hourly, water, annual, georisques, bathing]
         default: due
 
 permissions:

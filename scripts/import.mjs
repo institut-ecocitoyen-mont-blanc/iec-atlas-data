@@ -12,15 +12,15 @@ import { loadGroundwaterCatalogue } from "../src/atlas/lib/groundwater-source.ts
 import { loadGroundwaterAnalyses, GROUNDWATER_SOURCE } from "../src/atlas/lib/groundwater.ts";
 import { loadDrinkingSummaries } from "../src/atlas/lib/drinking-networks.ts";
 import { CCPMB_COMMUNES } from "../src/atlas/lib/ccpmb-territory.ts";
-import { loadGeorisques, georisquesUrl } from "../src/atlas/lib/georisques-source.ts";
+import { loadGeorisques } from "../src/atlas/lib/georisques-source.ts";
 
 const mode = process.env.IMPORT_MODE || "due";
-if (!["due", "all", "hourly", "water", "annual", "georisques"].includes(mode)) throw new Error("Invalid import mode");
+if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing"].includes(mode)) throw new Error("Invalid import mode");
 const store = await openStore("public");
 const signal = () => AbortSignal.timeout(60000);
 const valid = (data) => { if (!data || data.error || data.fetchedAt === null) throw new Error("Invalid or incomplete dataset"); };
 const nonempty = (data) => { if (!Array.isArray(data) || !data.length) throw new Error("Unexpected empty catalogue"); };
-function due(key, group, hours) { return mode === "all" || mode === group || mode === "due" && isDue(store.manifest.datasets[key], hours); }
+function due(key, group, hours) { return mode === "all" || mode === group || mode === key || mode === "due" && isDue(store.manifest.datasets[key], hours); }
 async function update(key, group, hours, source, loader, validate = valid) {
   if (!due(key, group, hours)) {
     const path = store.manifest.datasets[key]?.path;
@@ -104,7 +104,7 @@ await Promise.all(Array.from({ length: 3 }, async () => {
 }));
 await update("traffic", "annual", 24 * 30, roadTrafficUrl(), loadRoadTraffic);
 await update("emissions", "annual", 24 * 30, IREP_CATALOGUE_URL, loadIndustrialEmissions);
-await update("georisques", "georisques", 24, georisquesUrl("instruction"), loadGeorisques, (data) => {
+await update("georisques", "georisques", 24, "https://www.georisques.gouv.fr/services", loadGeorisques, (data) => {
   valid(data);
   // Never replace a complete catalogue with one missing an entire source.
   if (data.errors.length || !Array.isArray(data.sites)) throw new Error("Incomplete Géorisques catalogue");

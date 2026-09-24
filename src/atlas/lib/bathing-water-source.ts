@@ -2,6 +2,29 @@
 import { BATHING_SITES, bathingSourceUrl, type BathingAssessment, type BathingData, type BathingPoint, type BathingSample, type BathingSite } from "./bathing-water.ts";
 import { filterCcpmbPoints } from "./ccpmb-territory.ts";
 
+// The legacy portal can take over 15 seconds even for a valid five-row page.
+// Retry transport/temporary HTTP failures only; identity/schema errors fail closed.
+async function bathingHtml(url: string, fetcher: typeof fetch, deadline: AbortSignal) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      deadline.throwIfAborted();
+      const response = await fetcher(url, { signal: AbortSignal.any([deadline, AbortSignal.timeout(30000)]), headers: { "Accept-Language": "fr" } });
+      if (!response.ok) {
+        if (attempt < 1 && (response.status === 429 || response.status >= 500)) {
+          await response.body?.cancel();
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
+        throw new Error(`Réponse du fournisseur : ${response.status}.`);
+      }
+      return new TextDecoder("windows-1252").decode(await response.arrayBuffer());
+    } catch (error) {
+      if (attempt >= 1 || deadline.aborted || !(error instanceof TypeError || error instanceof Error && error.name === "TimeoutError")) throw error;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
+}
+
 const text = (html: string) => html.replace(/<!--[\s\S]*?-->/g, "").replace(/<\/?[a-z][^>]*>/gi, "")
   .replace(/&nbsp;|&#160;/g, " ").replace(/&lt;|&#60;/g, "<").replace(/&gt;|&#62;/g, ">")
   .replace(/&eacute;/g, "é").replace(/&egrave;/g, "è").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -54,16 +77,13 @@ export async function loadBathingWater(fetcher: typeof fetch = fetch, now = new 
   const year = now.getUTCFullYear();
   // Six verified local sites; at most three simultaneous requests. A failed year/site
   // never fabricates values or prevents another site or the inventory from loading.
-  const deadline = AbortSignal.timeout(25000);
+  const deadline = AbortSignal.timeout(150000);
   const loadSite = async (site: BathingSite): Promise<BathingPoint> => {
     const seasons = [];
     for (const seasonYear of [year, year - 1]) {
       const sourceUrl = bathingSourceUrl(site.id, seasonYear);
       try {
-        const options = { signal: AbortSignal.any([deadline, AbortSignal.timeout(15000)]), headers: { "Accept-Language": "fr" }, next: { revalidate: 3600 } };
-        const response = await fetcher(sourceUrl, options);
-        if (!response.ok) throw new Error(`Réponse du fournisseur : ${response.status}.`);
-        const html = new TextDecoder("windows-1252").decode(await response.arrayBuffer());
+        const html = await bathingHtml(sourceUrl, fetcher, deadline);
         const samples = parseBathingPage(html, site, seasonYear);
         seasons.push({ year: seasonYear, sourceUrl, samples, fetchedAt: new Date().toISOString() });
       } catch {

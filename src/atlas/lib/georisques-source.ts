@@ -1,5 +1,5 @@
 import polygonClipping from "polygon-clipping";
-import { CCPMB_COMMUNES, CCPMB_POLYGONS, insideCcpmb } from "./ccpmb-territory.ts";
+import { CCPMB_COMMUNES, CCPMB_POLYGONS, CCPMB_BOUNDS, insideCcpmb } from "./ccpmb-territory.ts";
 import type { GeorisquesData, GeorisquesSite, GeoPolygons, GeoPosition, SoilRecord } from "./georisques.ts";
 
 type Row = Record<string, unknown>;
@@ -77,7 +77,7 @@ export function groupSoilRecords(sites: GeorisquesSite[]): GeorisquesSite[] {
   }
   return [...grouped.values()];
 }
-export async function loadGeorisques(fetcher: typeof fetch = fetch): Promise<GeorisquesData> {
+async function loadGeorisquesRest(fetcher: typeof fetch): Promise<GeorisquesData> {
   const signal = AbortSignal.timeout(30000);
   const parts = await Promise.all((["instruction", "sis"] as const).map(async (kind) => {
     try {
@@ -103,5 +103,71 @@ export async function loadGeorisques(fetcher: typeof fetch = fetch): Promise<Geo
       return { sites: [], error: `${kind === "sis" ? "Les secteurs SIS" : "Les dossiers de pollution des sols"} n’ont pas pu être récupérés. Nouvelle tentative lors du prochain import automatique.` };
     }
   }));
-  return { sites: groupSoilRecords(parts.flatMap((part) => part.sites)), fetchedAt: parts.some((part) => !part.error) ? new Date().toISOString() : null, errors: parts.flatMap((part) => part.error ? [part.error] : []) };
+  return { sites: groupSoilRecords(parts.flatMap((part) => part.sites)), fetchedAt: parts.some((part) => !part.error) ? new Date().toISOString() : null, errors: parts.flatMap((part) => part.error ? [part.error] : []), transport: "rest", sourceUrls: [georisquesUrl("instruction"), georisquesUrl("sis")] };
+}
+
+const WFS_LAYERS = ["SSP_INSTR_GE_POLYGONE", "SSP_INSTR_GE_POINT", "SSP_CLASSIF_SIS_GE"] as const;
+type WfsLayer = typeof WFS_LAYERS[number];
+export function georisquesWfsUrl(layer: WfsLayer, hits = false) {
+  const b = CCPMB_BOUNDS;
+  const query = new URLSearchParams({ SERVICE: "WFS", VERSION: "2.0.0", REQUEST: "GetFeature", TYPENAMES: `ms:${layer}`, SRSNAME: "urn:ogc:def:crs:EPSG::4326",
+    // WFS 2.0 EPSG:4326 query axes are latitude, longitude. Returned GeoJSON
+    // explicitly declares CRS84 (longitude, latitude); verify before parsing.
+    BBOX: [b.south, b.west, b.north, b.east, "urn:ogc:def:crs:EPSG::4326"].join(","),
+  });
+  if (hits) query.set("RESULTTYPE", "hits");
+  else { query.set("COUNT", "1000"); query.set("OUTPUTFORMAT", "application/json; subtype=geojson; charset=utf-8"); }
+  return `https://www.georisques.gouv.fr/services?${query}`;
+}
+async function wfsText(url: string, fetcher: typeof fetch, signal: AbortSignal) {
+  const response = await fetcher(url, { signal });
+  if (!response.ok) throw new Error(`Géorisques WFS ${response.status}`);
+  // Bound streamed bytes too, not only the final decoded text.
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Réponse WFS absente.");
+  const decoder = new TextDecoder(); let bytes = 0, body = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return body + decoder.decode();
+      bytes += value.byteLength;
+      if (bytes > 4_000_000) throw new Error("Réponse WFS trop volumineuse.");
+      body += decoder.decode(value, { stream: true });
+    }
+  } finally { await reader.cancel(); }
+}
+export async function loadGeorisquesWfs(fetcher: typeof fetch = fetch): Promise<GeorisquesData> {
+  const signal = AbortSignal.timeout(60000);
+  const parts = await Promise.all(WFS_LAYERS.map(async layer => {
+    const hits = await wfsText(georisquesWfsUrl(layer, true), fetcher, signal);
+    const match = hits.match(/<wfs:FeatureCollection\b[^>]*\bnumberMatched="(\d+)"/);
+    if (!match || Number(match[1]) > 1000) throw new Error("Décompte WFS absent ou trop volumineux.");
+    const data = record(JSON.parse(await wfsText(georisquesWfsUrl(layer), fetcher, signal)));
+    if (data.type !== "FeatureCollection" || !Array.isArray(data.features) || data.features.length !== Number(match[1])) throw new Error("Catalogue WFS incomplet.");
+    if (record(record(data.crs).properties).name !== "urn:ogc:def:crs:OGC:1.3:CRS84") throw new Error("CRS WFS inattendu.");
+    const kind = layer === "SSP_CLASSIF_SIS_GE" ? "sis" : "instruction";
+    const rows = data.features.map(value => {
+      const feature = record(value), p = record(feature.properties);
+      if (feature.type !== "Feature") throw new Error("Objet WFS inattendu.");
+      const id = text(p.code_metier);
+      if (!/^SSP\d+$/.test(id)) throw new Error("Identifiant WFS absent.");
+      return { identifiant_ssp: id, code_insee: p.code_insee, nom_commune: p.nom_commune, nom_etablissement: p.nom_etablissement, nom: p.nom_etablissement, adresse: p.adresse,
+        geom: feature.geometry, id_sis: kind === "sis" ? p.id_inventaire_classification : "",
+        statut: p.statut_instruction, date_maj: p.date_maj,
+        // SIS WFS does not publish the dossier update date/status. Do not use
+        // date_saisie_commune or date_ap as an invented dossier update date.
+        fiche_risque: `https://fiches-risques.brgm.fr/georisques/infosols/${kind === "sis" ? "classification" : "instruction"}/${id}`,
+      };
+    });
+    return { kind, rows };
+  }));
+  // Validate IDs across both instruction geometry layers, not just within each.
+  const sites = (["instruction", "sis"] as const).flatMap(kind => parseSoilRecords(parts.filter(p => p.kind === kind).flatMap(p => p.rows), kind));
+  return { sites: groupSoilRecords(sites), errors: [], fetchedAt: new Date().toISOString(), transport: "wfs", sourceUrls: WFS_LAYERS.map(layer => georisquesWfsUrl(layer)) };
+}
+export async function loadGeorisques(fetcher: typeof fetch = fetch): Promise<GeorisquesData> {
+  // The published WFS is available while REST's gateway is failing. Prefer
+  // the working official source; do not make a failing REST call a prerequisite.
+  try { return await loadGeorisquesWfs(fetcher); }
+  catch { return loadGeorisquesRest(fetcher); } // Preserve last complete snapshot if both fail.
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clipSoilGeometry, parseSoilRecords, groupSoilRecords, loadGeorisques, georisquesUrl } from '../lib/georisques-source.ts';
+import { clipSoilGeometry, parseSoilRecords, groupSoilRecords, loadGeorisques, georisquesUrl, georisquesWfsUrl, loadGeorisquesWfs } from '../lib/georisques-source.ts';
 import { insideCcpmb } from '../lib/ccpmb-territory.ts';
 import { soilRecordColor } from '../lib/georisques.ts';
 
@@ -17,6 +17,56 @@ test('clips polygons to the union, including holes and disconnected portions', (
   assert.equal(insideCcpmb(1,7,geometry.coordinates), true);
   for (const polygon of geometry.coordinates) for (const [x,y] of polygon[0]) assert.ok(insideCcpmb(y,x,territory));
   assert.equal(clipSoilGeometry({ type: 'Point', coordinates: [1.5,1.5] }, territory), null);
+});
+
+const wfsFeature = (kind) => ({ type: 'Feature', properties: { code_metier: kind === 'sis' ? 'SSP00006650101' : row.identifiant_ssp, code_insee: row.code_insee, nom_commune: row.nom_commune, nom_etablissement: row.nom_etablissement, adresse: row.adresse, ...(kind === 'sis' ? { id_inventaire_classification: '74SIS02337', date_saisie_commune: '2015-01-01' } : { statut_instruction: row.statut, date_maj: row.date_maj }) }, geometry: row.geom });
+function wfsFetcher(url) {
+  const q = new URL(url).searchParams;
+  const layer = q.get('TYPENAMES');
+  const features = layer.endsWith('POLYGONE') ? [] : [wfsFeature(layer.includes('SIS') ? 'sis' : 'instruction')];
+  if (q.get('RESULTTYPE') === 'hits') return Response.json(null, { status: 500 });
+  return Response.json({ type: 'FeatureCollection', crs: { type: 'name', properties: { name: 'urn:ogc:def:crs:OGC:1.3:CRS84' } }, features });
+}
+const completeWfs = async (url) => {
+  const q = new URL(url).searchParams;
+  if (q.get('RESULTTYPE') === 'hits') return new Response(`<wfs:FeatureCollection numberMatched="${q.get('TYPENAMES').endsWith('POLYGONE') ? 0 : 1}" numberReturned="0"/>`);
+  return wfsFetcher(url);
+};
+test('uses complete official WFS without first calling the broken REST gateway or fabricating SIS metadata', async () => {
+  let restCalls = 0;
+  const data = await loadGeorisques(async url => { if (new URL(url).pathname.includes('/api/')) { restCalls++; return new Response('', { status: 503 }); } return completeWfs(url); });
+  assert.equal(restCalls, 0);
+  assert.deepEqual(data.errors, []);
+  assert.equal(data.transport, 'wfs');
+  assert.equal(data.sites.length, 1);
+  assert.equal(data.sites[0].records.length, 2);
+  const sector = data.sites[0].records.find(r => r.kind === 'sis');
+  assert.equal(sector.updatedAt, '');
+  assert.equal(sector.status, '');
+  assert.equal(sector.sisId, '74SIS02337');
+  assert.match(sector.url, /classification\/SSP00006650101$/);
+});
+test('WFS uses explicit latitude/longitude bbox but requires CRS84 longitude/latitude JSON', async () => {
+  const url = new URL(georisquesWfsUrl('SSP_INSTR_GE_POINT'));
+  assert.equal(url.searchParams.get('VERSION'), '2.0.0');
+  assert.ok(Number(url.searchParams.get('BBOX').split(',')[0]) > 45);
+  await assert.rejects(loadGeorisquesWfs(async url => {
+    const response = await completeWfs(url);
+    if (new URL(url).searchParams.has('RESULTTYPE')) return response;
+    const data = await response.json(); data.crs.properties.name = 'EPSG:2154';
+    return Response.json(data);
+  }), /CRS/);
+});
+test('WFS refuses truncated, oversized, duplicate and partly unavailable catalogues', async () => {
+  for (const fail of ['truncated', 'oversized', 'duplicate', 'unavailable']) {
+    await assert.rejects(loadGeorisquesWfs(async url => {
+      const q = new URL(url).searchParams;
+      if (q.get('RESULTTYPE') === 'hits' && fail !== 'unavailable') return new Response(`<wfs:FeatureCollection numberMatched="${fail === 'oversized' ? 1001 : 2}"/>`);
+      if (fail === 'unavailable' && q.get('TYPENAMES').includes('SIS')) return new Response('', { status: 500 });
+      if (fail === 'duplicate' && !q.has('RESULTTYPE')) { const data = await (await completeWfs(url)).json(); data.features = [wfsFeature('instruction'), wfsFeature('instruction')]; return Response.json(data); }
+      return completeWfs(url);
+    }));
+  }
 });
 test('soil records preserve status, dates and real source identities without outside markers', () => {
   const sites = parseSoilRecords([row, { ...row, identifiant_ssp: 'SSP123', code_insee: '74266' }, { ...row, identifiant_ssp: 'SSP456', geom: { type: 'Point', coordinates: [6.87,45.92] } }], 'instruction');
