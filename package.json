@@ -1,0 +1,12 @@
+{
+  "name": "iec-atlas-data",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "import": "node scripts/import.mjs",
+    "test": "node --test tests/*.test.mjs src/atlas/tests/*.test.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "dependencies": { "csv-parse": "7.0.2", "fflate": "0.8.3" }
+}

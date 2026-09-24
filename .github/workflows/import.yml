@@ -1,0 +1,77 @@
+name: Import and publish atlas data
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['public/**']
+  schedule:
+    - cron: '27 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Import group (all forces every source)
+        type: choice
+        options: [due, all, hourly, water, annual]
+        default: due
+
+permissions:
+  contents: read
+concurrency:
+  group: atlas-data-publish
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    outputs:
+      result: ${{ steps.import.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Import due sources
+        id: import
+        continue-on-error: true
+        env:
+          IMPORT_MODE: ${{ inputs.mode || 'due' }}
+        run: npm run import
+      - run: npm run check
+      - name: Retain datasets and import status
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public
+          if ! git diff --cached --quiet; then
+            git commit -m 'Refresh atlas datasets and import status'
+            git push
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+  publish:
+    needs: import
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
+  report:
+    needs: [import, publish]
+    if: ${{ always() && needs.import.outputs.result == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report provider failures after publishing usable data
+        run: |
+          echo '::error::Some providers failed. Last successful data were retained. See import job summary and public manifest.'
+          exit 1
