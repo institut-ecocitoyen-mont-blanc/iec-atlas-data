@@ -12,9 +12,10 @@ import { loadGroundwaterCatalogue } from "../src/atlas/lib/groundwater-source.ts
 import { loadGroundwaterAnalyses, GROUNDWATER_SOURCE } from "../src/atlas/lib/groundwater.ts";
 import { loadDrinkingSummaries } from "../src/atlas/lib/drinking-networks.ts";
 import { CCPMB_COMMUNES } from "../src/atlas/lib/ccpmb-territory.ts";
+import { loadGeorisques, georisquesUrl } from "../src/atlas/lib/georisques-source.ts";
 
 const mode = process.env.IMPORT_MODE || "due";
-if (!["due", "all", "hourly", "water", "annual"].includes(mode)) throw new Error("Invalid import mode");
+if (!["due", "all", "hourly", "water", "annual", "georisques"].includes(mode)) throw new Error("Invalid import mode");
 const store = await openStore("public");
 const signal = () => AbortSignal.timeout(60000);
 const valid = (data) => { if (!data || data.error || data.fetchedAt === null) throw new Error("Invalid or incomplete dataset"); };
@@ -103,6 +104,11 @@ await Promise.all(Array.from({ length: 3 }, async () => {
 }));
 await update("traffic", "annual", 24 * 30, roadTrafficUrl(), loadRoadTraffic);
 await update("emissions", "annual", 24 * 30, IREP_CATALOGUE_URL, loadIndustrialEmissions);
+await update("georisques", "georisques", 24, georisquesUrl("instruction"), loadGeorisques, (data) => {
+  valid(data);
+  // Never replace a complete catalogue with one missing an entire source.
+  if (data.errors.length || !Array.isArray(data.sites)) throw new Error("Incomplete Géorisques catalogue");
+});
 const failures = await store.save();
 if (process.env.GITHUB_STEP_SUMMARY) {
   const lines = Object.entries(store.manifest.datasets).map(([key, d]) => `| ${key} | ${d.status} | ${d.lastSuccessAt ?? "never"} |`);

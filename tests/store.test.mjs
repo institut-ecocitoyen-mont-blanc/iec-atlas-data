@@ -71,3 +71,19 @@ test("Atmo licence and attribution accompany JSON and manifest", async () => {
     assert.equal(store.manifest.datasets["air-pm25"].license.id, "ODbL-1.0");
   } finally { await rm(dir, { recursive: true }); }
 });
+test("Géorisques licence accompanies snapshots; partial catalogue failure retains complete data", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "atlas-store-test-"));
+  try {
+    const store = await openStore(dir);
+    await store.update("georisques", "provider", 24, async () => ({ sites: [1, 2], errors: [] }));
+    const snapshot = JSON.parse(await readFile(join(dir, "data/georisques.json")));
+    assert.equal(snapshot.license.id, "etalab-2.0");
+    assert.match(snapshot.attribution, /BRGM/);
+    const retained = await store.update("georisques", "provider", 24, async () => ({ sites: [1], errors: ["SIS unavailable"] }), (data) => {
+      if (data.errors.length) throw new Error("Incomplete catalogue");
+    });
+    assert.deepEqual(retained.sites, [1, 2]);
+    assert.deepEqual(JSON.parse(await readFile(join(dir, "data/georisques.json"))), snapshot);
+    assert.equal(store.manifest.datasets.georisques.status, "error");
+  } finally { await rm(dir, { recursive: true }); }
+});

@@ -8,7 +8,7 @@ Imports publics pour l’atlas environnemental du Pays du Mont-Blanc, limités a
 
 ## Fonctionnement
 
-GitHub Actions démarre à la minute 27 de chaque heure (UTC, sans garantie de ponctualité). Le script utilise des créneaux UTC pour ne charger que les sources dues : inventaire et air chaque heure, eau chaque jour, trafic et IREP chaque mois. Une exécution manuelle peut forcer un groupe ou toutes les sources. Il faut réactiver un workflow public si GitHub le désactive après une longue période d’inactivité.
+GitHub Actions démarre à la minute 27 de chaque heure (UTC, sans garantie de ponctualité). Le script utilise des créneaux UTC pour ne charger que les sources dues : inventaire et air chaque heure, eau et Géorisques chaque jour, trafic et IREP chaque mois. Une exécution manuelle peut forcer un groupe ou toutes les sources. Il faut réactiver un workflow public si GitHub le désactive après une longue période d’inactivité.
 
 Chaque import valide et réduit la réponse du fournisseur avant publication. Un échec conserve le dernier fichier valide et sa date de réussite. Un échec initial ne crée pas de faux tableau vide. Pour la baignade, les saisons valides sont publiées indépendamment des saisons indisponibles ; les résultats antérieurs des saisons en échec sont conservés, avec un avertissement. Aucun résultat n’est inventé. Les checkpoints préservent les sources déjà validées en cas d’interruption.
 
@@ -25,6 +25,8 @@ La publication Pages est indépendante du site principal. L’atlas charge ces f
 Les fichiers de détail sont chargés à la demande : `river-<id>` et `drinking-<réseau>` (10 résultats maximum), `groundwater-<id>` (200 résultats maximum). Ce ne sont pas des historiques exhaustifs. Les résultats nuls/non quantifiés ne sont pas convertis en zéros. Les captages publics volontairement géolocalisés au chef-lieu restent approximatifs.
 
 ## Sources et limites
+
+`georisques` réunit les dossiers SSP d’instruction et les secteurs SIS de l’API publique v1. Les points et emprises sont limités aux dix communes, les dossiers de même nom et emprise regroupés en conservant leurs identifiants, dates et liens. Ni CASIAS ni ICPE ne sont inclus. Si l’une des deux sources échoue, le dernier catalogue complet est conservé. Réutilisation sous [Licence Ouverte](https://www.georisques.gouv.fr/mentions-legales), attribution Ministère de la Transition écologique / BRGM jointe au JSON. Les couleurs distinguent des catégories administratives, pas un niveau de gravité sanitaire. Le groupe manuel `georisques` force uniquement cet import.
 
 | Jeu | Fournisseur / format |
 |---|---|

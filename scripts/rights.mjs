@@ -7,4 +7,10 @@ export const ATMO_RIGHTS = {
   ],
   transformations: "Extrait local CCPMB normalisé par l’Institut écocitoyen. Base dérivée publiée sous ODbL 1.0. Dates, unités et statuts de validation conservés. Les mesures peuvent être corrigées ou invalidées ultérieurement par Atmo.",
 };
-export function rightsForDataset(key) { return key.startsWith("air-") ? ATMO_RIGHTS : {}; }
+export const GEORISQUES_RIGHTS = {
+  license: { id: "etalab-2.0", url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/" },
+  attribution: "Géorisques · Ministère de la Transition écologique / BRGM",
+  metadata: ["https://www.georisques.gouv.fr/mentions-legales"],
+  transformations: "Dossiers d’instruction SSP et secteurs SIS limités aux dix communes de la CCPMB. Emprises découpées aux limites communales, dossiers de même nom et emprise regroupés. Aucune classe sanitaire calculée.",
+};
+export function rightsForDataset(key) { return key.startsWith("air-") ? ATMO_RIGHTS : key === "georisques" ? GEORISQUES_RIGHTS : {}; }
