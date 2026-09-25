@@ -13,9 +13,13 @@ import { loadGroundwaterAnalyses, GROUNDWATER_SOURCE } from "../src/atlas/lib/gr
 import { loadDrinkingSummaries } from "../src/atlas/lib/drinking-networks.ts";
 import { CCPMB_COMMUNES } from "../src/atlas/lib/ccpmb-territory.ts";
 import { loadGeorisques } from "../src/atlas/lib/georisques-source.ts";
+import { loadPesticidePurchases, PESTICIDE_SOURCE } from "../src/atlas/lib/pesticide-purchases.ts";
+import { loadCeremaLight, CEREMA_LIGHT_SOURCE } from "../src/atlas/lib/cerema-light.ts";
+import { ATMO_MODELS, ATMO_MODEL_SOURCE } from "../src/atlas/lib/atmo-model.ts";
+import { loadAtmoModelExport } from "./atmo-model-export.mjs";
 
 const mode = process.env.IMPORT_MODE || "due";
-if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing"].includes(mode)) throw new Error("Invalid import mode");
+if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing", "overlays"].includes(mode)) throw new Error("Invalid import mode");
 const store = await openStore("public");
 const signal = () => AbortSignal.timeout(60000);
 const valid = (data) => { if (!data || data.error || data.fetchedAt === null) throw new Error("Invalid or incomplete dataset"); };
@@ -109,6 +113,12 @@ await update("georisques", "georisques", 24, "https://www.georisques.gouv.fr/ser
   // Never replace a complete catalogue with one missing an entire source.
   if (data.errors.length || !Array.isArray(data.sites)) throw new Error("Incomplete Géorisques catalogue");
 });
+// Small local annual/monthly products, refreshed monthly; never visitor requests.
+await update("pesticide-purchases", "overlays", 720, PESTICIDE_SOURCE, () => loadPesticidePurchases(signal(), true), (data) => { valid(data); nonempty(data.rows); nonempty(data.years); });
+await update("cerema-light", "overlays", 720, CEREMA_LIGHT_SOURCE, () => loadCeremaLight(signal(), true));
+for (const { id } of ATMO_MODELS) {
+  await update(`atmo-model-${id}`, "overlays", 720, ATMO_MODEL_SOURCE, () => loadAtmoModelExport(id, signal()));
+}
 const failures = await store.save();
 if (process.env.GITHUB_STEP_SUMMARY) {
   const lines = Object.entries(store.manifest.datasets).map(([key, d]) => `| ${key} | ${d.status} | ${d.lastSuccessAt ?? "never"} |`);

@@ -14,7 +14,25 @@ Chaque import valide et réduit la réponse du fournisseur avant publication. Un
 
 Le workflow commit les données normalisées uniquement lorsqu’elles changent ; le manifest d’exploitation est mis à jour à chaque exécution. Il publie ensuite l’ensemble via GitHub Pages, puis signale les erreurs fournisseur dans un job en échec. Activer les notifications d’échec Actions dans les préférences GitHub des mainteneurs. L’atlas signale aussi les imports en retard ; il ne peut pas réveiller un ordonnanceur GitHub arrêté.
 
-La publication Pages est indépendante du site principal. L’atlas charge ces fichiers directement : aucun jeton dans le navigateur, aucun appel des visiteurs aux fournisseurs. Les fonds de carte restent gérés séparément.
+La publication Pages est indépendante du site principal. L’atlas charge ces fichiers directement : aucun jeton dans le navigateur, aucun appel des visiteurs aux fournisseurs. Seules les tuiles du fond OpenStreetMap restent gérées séparément. Le diagnostic global des imports est disponible dans la console du navigateur, sans bannière technique ; les dates et limites des mesures restent dans les fiches.
+
+### Nouvelles couches : groupe `overlays`
+
+Six nouveaux exports sont vérifiés mensuellement par le planificateur existant. `IMPORT_MODE=overlays npm run import` ou le choix manuel `overlays` force uniquement ces sources :
+
+| Identifiant | Contenu | Licence |
+|---|---|---|
+| `pesticide-purchases` | Achats annuels de substances actives depuis 2013, zones postales 74190, 74700, 74120, 74170, 74920 | Licence Ouverte 2.0 |
+| `cerema-light` | Séries mensuelles de radiance des dix communes, édition communale 2026 | Licence Ouverte 2.0 |
+| `atmo-model-pm25`, `atmo-model-pm10`, `atmo-model-no2`, `atmo-model-o3` | Rendus cartographiques Atmo 2025, O₃ sur 2023–2025 | ODbL 1.0 |
+
+Pesticides : `quantite` de l’API est en kg de substance active, jamais en litres de produit commercial. Les pages sont toutes chargées avant validation du décompte. Les valeurs confidentielles, absentes ou invalides restent null ; elles ne sont pas remplacées par zéro. Les totaux portent sur les zones postales entières, pas sur des parcelles ou communes individuelles. La géométrie d’affichage rassemble nos communes par code postal : ce n’est pas un découpage postal officiel, ni une répartition des achats dans le territoire. Source : [Hub’Eau BNV-D](https://www.data.gouv.fr/dataservices/hubeau-vente-et-achat-de-produits-phytopharmaceutiques).
+
+Cerema : seuls les dix enregistrements communaux sont conservés, pas la couche infracommunale. La moyenne concerne l’empreinte lumineuse retenue, pas une radiance uniforme dans chaque quartier. Source et licence : [catalogue Cerema](https://www.data.gouv.fr/datasets/cartographie-nationale-des-pratiques-declairage-nocturne).
+
+Atmo : `scripts/atmo-model-export.mjs` demande quatre images PNG au WMS officiel, vérifie format/dimensions et les masque aux dix communes avant publication. Chaque JSON contient une image PNG base64, son emprise `bbox` en EPSG:3857, largeur/hauteur, période, indicateur et URL de reproduction. Maximum 4096 pixels sur le grand côté (environ 8 m au sol au centre du territoire) : image de présentation, pas grille de concentrations interrogeable. Les couleurs d’origine ne sont pas reclassées. La transformation et ses paramètres sont ouverts ; [la base originale](https://depot.atmo-aura.fr/modelisation/opendata_geotiff/2025/) reste sous [ODbL 1.0](https://www.data.gouv.fr/datasets/cartes-annuelles-2025). La période 2025 est épinglée intentionnellement : passer à une nouvelle édition nécessite aussi de vérifier et mettre à jour les légendes du site.
+
+Les six imports réutilisent les checkpoints, licences par jeu, hash des observations, et conservation du dernier résultat valide. Un échec fournisseur n’efface jamais un export utilisable. Les parseurs opérationnels sont dans ce dépôt ; leurs homologues côté site ne pilotent pas GitHub Actions.
 
 ## Contrat v1
 
