@@ -1,4 +1,5 @@
 import polygonClipping from "polygon-clipping";
+import { installationsUrl, loadInstallations } from "./georisques-installations.ts";
 import { CCPMB_COMMUNES, CCPMB_POLYGONS, CCPMB_BOUNDS, insideCcpmb } from "./ccpmb-territory.ts";
 import type { GeorisquesData, GeorisquesSite, GeoPolygons, GeoPosition, SoilRecord } from "./georisques.ts";
 
@@ -168,6 +169,15 @@ export async function loadGeorisquesWfs(fetcher: typeof fetch = fetch): Promise<
 export async function loadGeorisques(fetcher: typeof fetch = fetch): Promise<GeorisquesData> {
   // The published WFS is available while REST's gateway is failing. Prefer
   // the working official source; do not make a failing REST call a prerequisite.
-  try { return await loadGeorisquesWfs(fetcher); }
-  catch { return loadGeorisquesRest(fetcher); } // Preserve last complete snapshot if both fail.
+  const [soil, installations] = await Promise.all([
+    loadGeorisquesWfs(fetcher).catch(() => loadGeorisquesRest(fetcher)),
+    loadInstallations(fetcher).then(data => ({ data, error: "" })).catch(() => ({ data: null, error: "Les installations et autres sites inspectés n’ont pas pu être récupérés. Nouvelle tentative lors du prochain import automatique." })),
+  ]);
+  // Any missing source is an error: the exporter retains its last complete snapshot.
+  return { ...soil, sites: [...soil.sites, ...(installations.data?.sites ?? [])],
+    fetchedAt: soil.fetchedAt ?? (installations.data ? new Date().toISOString() : null),
+    errors: [...soil.errors, ...(installations.error ? [installations.error] : [])],
+    transport: soil.transport === "wfs" ? "wfs+rest" : "rest",
+    sourceUrls: [...(soil.sourceUrls ?? []), installationsUrl()], installations: installations.data?.coverage,
+  };
 }

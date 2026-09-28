@@ -11,7 +11,7 @@ export const GEORISQUES_RIGHTS = {
   license: { id: "etalab-2.0", url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/" },
   attribution: "Géorisques · Ministère de la Transition écologique / BRGM",
   metadata: ["https://www.georisques.gouv.fr/mentions-legales"],
-  transformations: "Dossiers d’instruction SSP et secteurs SIS limités aux dix communes de la CCPMB. Emprises découpées aux limites communales, dossiers de même nom et emprise regroupés. Aucune classe sanitaire calculée.",
+  transformations: "Dossiers d’instruction SSP, secteurs SIS, installations classées et autres sites inspectés limités aux dix communes de la CCPMB. Emprises découpées aux limites communales, dossiers sols de même nom et emprise regroupés. Installations identifiées séparément par code AIOT, régimes Non ICPE conservés. Coordonnées officielles uniquement ; dates de mise à jour et d’inspection distinctes. Aucune classe sanitaire calculée.",
 };
 const OPEN_LICENSE = { id: "etalab-2.0", url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/" };
 export function rightsForDataset(key) {

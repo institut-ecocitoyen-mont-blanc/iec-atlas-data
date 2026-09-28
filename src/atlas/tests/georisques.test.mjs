@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { clipSoilGeometry, parseSoilRecords, groupSoilRecords, loadGeorisques, georisquesUrl, georisquesWfsUrl, loadGeorisquesWfs } from '../lib/georisques-source.ts';
 import { insideCcpmb } from '../lib/ccpmb-territory.ts';
 import { soilRecordColor } from '../lib/georisques.ts';
+import { installationsUrl, parseInstallations, loadInstallations } from '../lib/georisques-installations.ts';
 
 const row = { identifiant_ssp: 'SSP000066501', nom_etablissement: 'COTTERLAZ-CARRAT', nom: 'COTTERLAZ-CARRAT', code_insee: '74208', nom_commune: 'PASSY', adresse: 'Rue de la Centrale', statut: 'En cours', date_maj: '2017-05-22', fiche_risque: 'https://fiches-risques.brgm.fr/georisques/infosols/instruction/SSP000066501', geom: { type: 'Point', coordinates: [6.726, 45.919] } };
 const sis = { ...row, identifiant_ssp: 'SSP00006650101', id_sis: '74SIS02337', statut_classification: 'Secteurs d’information sur les sols', date_maj: '2020-09-30', fiche_risque: 'https://fiches-risques.brgm.fr/georisques/infosols/classification/SSP00006650101' };
@@ -34,10 +35,13 @@ const completeWfs = async (url) => {
 };
 test('uses complete official WFS without first calling the broken REST gateway or fabricating SIS metadata', async () => {
   let restCalls = 0;
-  const data = await loadGeorisques(async url => { if (new URL(url).pathname.includes('/api/')) { restCalls++; return new Response('', { status: 503 }); } return completeWfs(url); });
+  const data = await loadGeorisques(async url => {
+    if (new URL(url).pathname.endsWith('/installations_classees')) return Response.json({ results:0, page:1, total_pages:0, next:null, data:[] });
+    if (new URL(url).pathname.includes('/api/')) { restCalls++; return new Response('', { status: 503 }); } return completeWfs(url);
+  });
   assert.equal(restCalls, 0);
   assert.deepEqual(data.errors, []);
-  assert.equal(data.transport, 'wfs');
+  assert.equal(data.transport, 'wfs+rest');
   assert.equal(data.sites.length, 1);
   assert.equal(data.sites[0].records.length, 2);
   const sector = data.sites[0].records.find(r => r.kind === 'sis');
@@ -96,6 +100,7 @@ test('requests all ten communes, follows pages and preserves a working source on
   const calls=[];
   const result = await loadGeorisques(async url => {
     const u = new URL(url); calls.push(u);
+    if(u.pathname.endsWith('installations_classees')) return Response.json({ results:0,page:1,total_pages:0,next:null,data:[] });
     if(u.pathname.endsWith('conclusions_sis')) return new Response('',{status:500});
     const page=Number(u.searchParams.get('page'));
     return Response.json({ results:2,page,total_pages:2,next:page===1?'unused':null,data:[page===1?row:{...row,identifiant_ssp:'SSP123',nom_etablissement:'Second dossier'}] });
@@ -103,5 +108,55 @@ test('requests all ten communes, follows pages and preserves a working source on
   assert.equal(result.sites.length,2); assert.equal(result.errors.length,1); assert.ok(result.fetchedAt);
   assert.ok(calls.some(u=>u.searchParams.get('page')==='2'));
   const failed=await loadGeorisques(async()=>Response.json({ results:10,page:1,total_pages:1,next:null,data:[row] }));
-  assert.equal(failed.sites.length,0); assert.equal(failed.errors.length,2); assert.equal(failed.fetchedAt,null);
+  assert.equal(failed.sites.length,0); assert.equal(failed.errors.length,3); assert.equal(failed.fetchedAt,null);
+});
+
+const installation = { codeAIOT:'0003204031', raisonSociale:'PUGNAT Frères TP', codeInsee:'74208', commune:'Passy', adresse1:"Bordure d’Arve", longitude:6.692092, latitude:45.921347, regime:'Non ICPE', etatActivite:null, statutSeveso:null, serviceAIOT:'DREAL AURA', date_maj:'2026-04-26/10-21-48', inspections:[{dateInspection:'2021-06-15'}] };
+test('retains Non ICPE, published coordinates and distinct inspection/update dates', () => {
+  const { sites, coverage } = parseInstallations([installation]);
+  assert.equal(sites.length,1);
+  assert.deepEqual(coverage, {total:1,mapped:1,missingCoordinates:0,outsideTerritory:0});
+  assert.deepEqual(sites[0].geometry.coordinates,[6.692092,45.921347]);
+  assert.equal(sites[0].id,'AIOT0003204031');
+  const record = sites[0].records[0];
+  assert.equal(record.regime,'Non ICPE'); assert.equal(record.status,''); assert.equal(record.seveso,'');
+  assert.equal(record.updatedAt,'2026-04-26'); assert.equal(record.lastInspectionAt,'2021-06-15');
+  assert.equal(record.url,'https://www.georisques.gouv.fr/risques/installations/donnees/details/0003204031');
+  assert.equal(soilRecordColor(sites[0]),'#247184');
+});
+test('installations enforce the ten communes and boundary without guessing missing locations', () => {
+  const result = parseInstallations([installation,
+    {...installation,codeAIOT:'0003204032',codeInsee:'74143'},
+    {...installation,codeAIOT:'0003204033',longitude:null},
+    {...installation,codeAIOT:'0003204034',longitude:6.87,latitude:45.92},
+  ]);
+  assert.deepEqual(result.coverage,{total:3,mapped:1,missingCoordinates:1,outsideTerritory:1});
+  assert.throws(()=>parseInstallations([installation,installation]),/dupliquée/);
+  assert.throws(()=>parseInstallations([{...installation,longitude:'6.69'}]),/Coordonnées/);
+  assert.throws(()=>parseInstallations([{...installation,codeAIOT:'javascript:alert(1)'}]));
+});
+test('installations follow every page, never arbitrary next URLs, and verify total counts', async () => {
+  const query = new URL(installationsUrl()).searchParams;
+  assert.equal(query.get('code_insee').split(',').length,10);
+  assert.ok(!query.get('code_insee').split(',').includes('74143'));
+  const calls=[];
+  const result=await loadInstallations(async url=>{
+    calls.push(url); const page=Number(new URL(url).searchParams.get('page'));
+    return Response.json({results:2,page,total_pages:2,next:page===1?'https://untrusted.example/':null,data:[{...installation,codeAIOT:page===1?'0003204031':'0003204032'}]});
+  });
+  assert.equal(result.sites.length,2);
+  assert.ok(calls.every(url=>url.startsWith('https://www.georisques.gouv.fr/api/')));
+  for (const body of [
+    {results:2,page:1,total_pages:1,next:null,data:[installation]},
+    {results:2,page:1,total_pages:11,next:'next',data:[installation]},
+    {results:2,page:1,total_pages:2,next:'next',data:[]},
+    {results:1,page:1,total_pages:1,next:'next',data:[installation]},
+  ]) await assert.rejects(loadInstallations(async()=>Response.json(body)));
+  await assert.rejects(loadInstallations(async()=>new Response('',{status:500})));
+});
+test('an installations failure makes the combined export incomplete, preserving last-good eligibility', async () => {
+  const data=await loadGeorisques(async url=> new URL(url).pathname.endsWith('/installations_classees') ? new Response('',{status:503}) : completeWfs(url));
+  assert.equal(data.sites.length,1);
+  assert.equal(data.errors.length,1);
+  assert.match(data.errors[0],/installations/);
 });
