@@ -21,6 +21,12 @@ export interface AirReading {
   value: number | null;
   unit: string;
   validation: string | null;
+  valueType?: string;
+  validity?: number;
+  qualityCode?: string;
+  rawValue?: number | null;
+  reportedValue?: number | null;
+  calculatedAt?: number | null;
 }
 export interface AirStation {
   id: string;
@@ -31,6 +37,7 @@ export interface AirStation {
   typology: string;
   readings: AirReading[];
   period?: "hourly" | "daily";
+  source?: "geodair";
 }
 export interface AirBounds { west: number; south: number; east: number; north: number }
 export function combineAirStations(datasets: Partial<Record<AirPollutant, { stations: AirStation[] }>>) {

@@ -17,9 +17,11 @@ import { loadPesticidePurchases, PESTICIDE_SOURCE } from "../src/atlas/lib/pesti
 import { loadCeremaLight, CEREMA_LIGHT_SOURCE } from "../src/atlas/lib/cerema-light.ts";
 import { ATMO_MODELS, ATMO_MODEL_SOURCE } from "../src/atlas/lib/atmo-model.ts";
 import { loadAtmoModelExport } from "./atmo-model-export.mjs";
+import { loadGeodairHourly, loadGeodairHistory } from "../src/atlas/lib/geodair-source.ts";
+import { GEODAIR_SOURCE } from "../src/atlas/lib/geodair.ts";
 
 const mode = process.env.IMPORT_MODE || "due";
-if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing", "overlays"].includes(mode)) throw new Error("Invalid import mode");
+if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing", "overlays", "geodair"].includes(mode)) throw new Error("Invalid import mode");
 const store = await openStore("public");
 const signal = () => AbortSignal.timeout(60000);
 const valid = (data) => { if (!data || data.error || data.fetchedAt === null) throw new Error("Invalid or incomplete dataset"); };
@@ -39,6 +41,14 @@ globalThis.fetch = (url, init = {}) => upstreamFetch(url, { ...init, signal: Abo
 await update("inventory", "hourly", 1, "https://docs.google.com/spreadsheets/d/1diIR2EXPf2QfkxUw-T0r3CRjinhcJVnnNH5azd0QxZg", async () => clipAtlasInventory(await fetchAllPollutionSites()), (data) => { valid(data); nonempty(data.sites); });
 for (const { id } of AIR_POLLUTANTS) {
   await update(`air-${id}`, "hourly", 1, ATMO_SERVICE, () => loadAirStations(id, AREA, signal()), nonempty);
+}
+// Respect Geod’air's once-per-hour query limit, even for forced/manual imports.
+// Last-good snapshots remain available if the key or the upstream is unavailable.
+for (const [key, hours, loader] of [["geodair-hourly", 1, loadGeodairHourly], ["geodair-history", 720, loadGeodairHistory]]) {
+  const entry = store.manifest.datasets[key];
+  if (isDue(entry, 1) && (mode === "geodair" || mode === "all" || mode === "hourly" && hours === 1 || mode === "due" && isDue(entry, hours))) {
+    await store.update(key, GEODAIR_SOURCE, hours, () => loader(process.env.GEODAIR_API_KEY), valid);
+  }
 }
 
 const water = "https://hubeau.eaufrance.fr";

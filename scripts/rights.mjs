@@ -15,6 +15,12 @@ export const GEORISQUES_RIGHTS = {
 };
 const OPEN_LICENSE = { id: "etalab-2.0", url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/" };
 export function rightsForDataset(key) {
+  if (key.startsWith("geodair-")) return {
+    license: { id: "Licence-Ouverte", url: "https://www.geodair.fr/donnees/api#block-useragreementsblockforgeodairgp" },
+    attribution: "Atmo Auvergne-Rhône-Alpes · Geod’air / LCSQA-Ineris",
+    metadata: ["https://www.geodair.fr/donnees/api", "https://www.geodair.fr/a-propos"],
+    transformations: "Extrait de la station Passy FR33220. Horaires UTC normalisés en timestamps, unités normalisées, valeurs invalides conservées à null ; valeurs publiées et brutes, type de valeur, validité et qualité conservés séparément. Historique annuel et prélèvements différés distincts des mesures horaires. Dates de mesures et d’import conservées. Résultats susceptibles de révision. La version de la Licence Ouverte n’est pas précisée dans les CGU.",
+  };
   if (key.startsWith("air-")) return ATMO_RIGHTS;
   if (key === "georisques") return GEORISQUES_RIGHTS;
   if (key.startsWith("atmo-model-")) return {

@@ -16,6 +16,17 @@ Le workflow commit les données normalisées uniquement lorsqu’elles changent 
 
 La publication Pages est indépendante du site principal. L’atlas charge ces fichiers directement : aucun jeton dans le navigateur, aucun appel des visiteurs aux fournisseurs. Seules les tuiles du fond OpenStreetMap restent gérées séparément. Le diagnostic global des imports est disponible dans la console du navigateur, sans bannière technique ; les dates et limites des mesures restent dans les fiches.
 
+### Geod’air : station Passy
+
+Le secret Actions `GEODAIR_API_KEY` est transmis uniquement à l’étape d’import, dans l’en-tête `apikey` du domaine officiel Geod’air. Il n’est jamais publié ni transmis au navigateur. Le groupe manuel `geodair` charge les deux exports ; même les modes forcés respectent une tentative par créneau UTC d’une heure. Ne pas lancer des imports locaux et CI avec la même clé dans le même créneau.
+
+- `geodair-hourly` : station FR33220, fenêtre glissante de sept jours, PM₂.₅, PM₁₀, NO₂, O₃, NO et NOₓ, chaque heure.
+- `geodair-history` : moyennes annuelles depuis 2013 jusqu’à la dernière année complète et prélèvements de benzo[a]pyrène depuis le début de l’année précédente, chaque mois.
+
+Les exportations sont asynchrones : une génération, puis téléchargement du même identifiant en cas de réponse 412. Les dates du fournisseur sont UTC. Type de valeur, validité et code qualité restent distincts ; validité inférieure à 1 donne une valeur affichable null, sans supprimer les champs source. Pas de fusion avec les séries régionales. Les codes NO/NOₓ et les statistiques historiques n’entrent pas dans le repère horaire de couleur des pins. Les mesures peuvent être révisées. Toute erreur conserve le dernier export valide.
+
+Ces deux jeux indépendants portent l’attribution Atmo Auvergne-Rhône-Alpes · Geod’air / LCSQA-Ineris et la Licence Ouverte indiquée dans les [CGU](https://www.geodair.fr/donnees/api#block-useragreementsblockforgeodairgp), sans version explicitement annoncée. Ne pas leur appliquer la notice ODbL du flux régional. L’accès standard ne couvre pas les stations complémentaires Sallanches Régie et Passy Chedde : les exports régionaux `air-*` restent nécessaires.
+
 ### Nouvelles couches : groupe `overlays`
 
 Six nouveaux exports sont vérifiés mensuellement par le planificateur existant. `IMPORT_MODE=overlays npm run import` ou le choix manuel `overlays` force uniquement ces sources :
