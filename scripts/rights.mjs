@@ -15,6 +15,12 @@ export const GEORISQUES_RIGHTS = {
 };
 const OPEN_LICENSE = { id: "etalab-2.0", url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/" };
 export function rightsForDataset(key) {
+  if (key === "atmo-index") return {
+    license: ATMO_RIGHTS.license,
+    attribution: "Source ATMO Auvergne - Rhône-Alpes : Indice communal de la qualité de l'air sur la région Auvergne - Rhône-Alpes",
+    metadata: ["https://ids.craig.fr/geocat/srv/api/records/b3e869c1-82f7-4345-80d6-c80dba21c0ae/formatters/xml"],
+    transformations: "Extrait des dix communes CCPMB, de la veille au lendemain. Codes, couleurs et qualificatifs officiels conservés ; date d’échéance et date de diffusion distinctes. Pas de coordonnées communales utilisées pour les stations. Base dérivée sous ODbL 1.0. Prévision quotidienne communale, pas mesure ponctuelle aux stations.",
+  };
   if (key.startsWith("geodair-")) return {
     license: { id: "Licence-Ouverte", url: "https://www.geodair.fr/donnees/api#block-useragreementsblockforgeodairgp" },
     attribution: "Atmo Auvergne-Rhône-Alpes · Geod’air / LCSQA-Ineris",

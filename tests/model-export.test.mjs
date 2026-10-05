@@ -31,6 +31,8 @@ test("Atmo raster export validates PNG dimensions and masks before publishing", 
   await assert.rejects(loadAtmoModelExport("pm25", new AbortController().signal), /unavailable/);
 });
 test("all new snapshots have dataset-specific rights and provenance", () => {
+  assert.equal(rightsForDataset("atmo-index").license.id, "ODbL-1.0");
+  assert.match(rightsForDataset("atmo-index").attribution, /Indice communal/);
   for (const key of ["pesticide-purchases", "cerema-light"]) assert.equal(rightsForDataset(key).license.id, "etalab-2.0");
   for (const id of ["pm25", "pm10", "no2", "o3"]) {
     const rights = rightsForDataset(`atmo-model-${id}`);

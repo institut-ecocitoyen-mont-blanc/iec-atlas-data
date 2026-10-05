@@ -16,6 +16,10 @@ Le workflow commit les données normalisées uniquement lorsqu’elles changent 
 
 La publication Pages est indépendante du site principal. L’atlas charge ces fichiers directement : aucun jeton dans le navigateur, aucun appel des visiteurs aux fournisseurs. Seules les tuiles du fond OpenStreetMap restent gérées séparément. Le diagnostic global des imports est disponible dans la console du navigateur, sans bannière technique ; les dates et limites des mesures restent dans les fiches.
 
+### Indice Atmo communal
+
+`atmo-index` est un export indépendant sous ODbL 1.0, vérifié chaque heure pour récupérer la publication quotidienne et ses corrections. Le WFS officiel `ind_aura:vuemat_agol_indices_2021` est limité aux dix communes et aux échéances de la veille au lendemain. Le groupe manuel `atmo-index` ne recharge que cet export, sans clé nécessaire. La date d’échéance est distincte de la date de diffusion : un indice publié hier peut qualifier aujourd’hui. Le site utilise uniquement l’échéance correspondant à la date du jour en Europe/Paris, avec les six couleurs et qualificatifs officiels ; aucun repli sur hier, demain ou une mesure de station. Les pins gardent les coordonnées des stations. En cas d’échec, le dernier snapshot est conservé, mais seul un indice applicable au jour courant peut colorer le pin. Source et licence vérifiées dans `src/atlas/docs/atmo-index-2026-10-05.md`.
+
 ### Geod’air : station Passy
 
 Le secret Actions `GEODAIR_API_KEY` est transmis uniquement à l’étape d’import, dans l’en-tête `apikey` du domaine officiel Geod’air. Il n’est jamais publié ni transmis au navigateur. Le groupe manuel `geodair` charge les deux exports ; même les modes forcés respectent une tentative par créneau UTC d’une heure. Ne pas lancer des imports locaux et CI avec la même clé dans le même créneau.

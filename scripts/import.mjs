@@ -19,9 +19,10 @@ import { ATMO_MODELS, ATMO_MODEL_SOURCE } from "../src/atlas/lib/atmo-model.ts";
 import { loadAtmoModelExport } from "./atmo-model-export.mjs";
 import { loadGeodairHourly, loadGeodairHistory } from "../src/atlas/lib/geodair-source.ts";
 import { GEODAIR_SOURCE } from "../src/atlas/lib/geodair.ts";
+import { loadAtmoIndex, ATMO_INDEX_WFS } from "../src/atlas/lib/atmo-index-source.ts";
 
 const mode = process.env.IMPORT_MODE || "due";
-if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing", "overlays", "geodair"].includes(mode)) throw new Error("Invalid import mode");
+if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing", "overlays", "geodair", "atmo-index"].includes(mode)) throw new Error("Invalid import mode");
 const store = await openStore("public");
 const signal = () => AbortSignal.timeout(60000);
 const valid = (data) => { if (!data || data.error || data.fetchedAt === null) throw new Error("Invalid or incomplete dataset"); };
@@ -42,6 +43,8 @@ await update("inventory", "hourly", 1, "https://docs.google.com/spreadsheets/d/1
 for (const { id } of AIR_POLLUTANTS) {
   await update(`air-${id}`, "hourly", 1, ATMO_SERVICE, () => loadAirStations(id, AREA, signal()), nonempty);
 }
+// Poll hourly for the daily publication and its corrections, including tomorrow's forecast.
+await update("atmo-index", "hourly", 1, ATMO_INDEX_WFS, () => loadAtmoIndex(), data => { valid(data); nonempty(data.records); });
 // Respect Geod’air's once-per-hour query limit, even for forced/manual imports.
 // Last-good snapshots remain available if the key or the upstream is unavailable.
 for (const [key, hours, loader] of [["geodair-hourly", 1, loadGeodairHourly], ["geodair-history", 720, loadGeodairHistory]]) {

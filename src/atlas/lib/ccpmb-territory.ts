@@ -37,6 +37,12 @@ export function insideCcpmb(lat: number, lng: number, polygons = CCPMB_POLYGONS)
   );
 }
 
+export function ccpmbCommuneAt(lat: number, lng: number) {
+  return boundaries.features.find(feature => insideCcpmb(lat, lng,
+    feature.geometry.type === "Polygon" ? [feature.geometry.coordinates as Polygon] : feature.geometry.coordinates as unknown as Polygon[],
+  ))?.properties;
+}
+
 // Scanline intersections for raster masking. Pair crossings within each
 // polygon (including holes), then union the commune spans. This avoids a full
 // point-in-polygon test for every heatmap pixel and leaves no internal seams.
