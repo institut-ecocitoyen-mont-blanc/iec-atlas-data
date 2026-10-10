@@ -19,9 +19,13 @@ export async function writeJson(path, data) {
   await rename(`${path}.tmp`, path);
 }
 export function isDue(entry, intervalHours, now = Date.now()) {
+  if (entry?.retiredAt) return false;
   if (!entry?.lastAttemptAt) return true;
   const previous = Date.parse(entry.lastAttemptAt);
   if (!Number.isFinite(previous)) return true;
+  // A transient outage must not defer recovery until the next day or month.
+  // Keep the hourly bucket guard, including for rate-limited Geod’air imports.
+  if (entry.status === "error") intervalHours = Math.min(intervalHours, 1);
   if (intervalHours === 720) return new Date(now).toISOString().slice(0, 7) !== new Date(previous).toISOString().slice(0, 7);
   // UTC buckets avoid skipping an hour/day because the previous job started late.
   return Math.floor(now / (intervalHours * 3600000)) > Math.floor(previous / (intervalHours * 3600000));
@@ -38,6 +42,18 @@ export async function openStore(directory, now = new Date().toISOString()) {
   };
   return {
     manifest,
+    async reconcileCatalogue(catalogueKey, prefix, activeKeys) {
+      // Never retire details using a failed/partial catalogue or an empty fallback.
+      if (manifest.datasets[catalogueKey]?.status !== "ok" || !activeKeys.length) return;
+      if (!prefix || !activeKeys.every((key) => key.startsWith(prefix))) throw new Error("Invalid catalogue keys");
+      const active = new Set(activeKeys);
+      for (const [key, entry] of Object.entries(manifest.datasets)) {
+        if (!key.startsWith(prefix)) continue;
+        if (active.has(key)) delete entry.retiredAt;
+        else entry.retiredAt ??= now;
+      }
+      await persist();
+    },
     async update(key, source, intervalHours, loader, validate = () => {}) {
       if (!/^[a-z0-9-]+$/.test(key)) throw new Error("Unsafe dataset key");
       const previous = manifest.datasets[key];

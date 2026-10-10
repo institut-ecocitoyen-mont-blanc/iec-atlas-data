@@ -19,12 +19,14 @@ test("secret is supplied only through the workflow import environment", async ()
   assert.match(workflow, /GEODAIR_API_KEY: \$\{\{ secrets.GEODAIR_API_KEY \}\}/);
   assert.ok(!workflow.includes("NEXT_PUBLIC_GEODAIR"));
 });
-test("hourly guard and monthly buckets include failed attempts", () => {
+test("hourly guard includes failed attempts; failed monthly imports can recover", () => {
   const now = Date.parse("2026-10-05T07:30:00Z");
   const entry = { lastAttemptAt: "2026-10-05T07:00:00Z", status: "error" };
   assert.equal(isDue(entry, 1, now), false);
   assert.equal(isDue(entry, 1, now + 3600000), true);
-  assert.equal(isDue(entry, 720, now + 86400000), false);
+  assert.equal(isDue(entry, 720, now), false);
+  assert.equal(isDue(entry, 720, now + 86400000), true);
+  assert.equal(isDue({ ...entry, status: "ok" }, 720, now + 86400000), false);
 });
 test("credential/upstream failure retains published Geod’air and does not disclose the thrown secret", async () => {
   const directory = await mkdtemp(join(tmpdir(), "geodair-store-test-"));

@@ -4,7 +4,9 @@ on:
     branches: [main]
     paths-ignore: ['public/**']
   schedule:
-    - cron: '27 * * * *'
+    # Two opportunities per hour; importer UTC buckets prevent duplicate requests.
+    # GitHub schedules remain best-effort, not a guaranteed hourly clock.
+    - cron: '27,57 * * * *'
   workflow_dispatch:
     inputs:
       mode:

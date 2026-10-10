@@ -8,7 +8,9 @@ Imports publics pour l’atlas environnemental du Pays du Mont-Blanc, limités a
 
 ## Fonctionnement
 
-GitHub Actions démarre à la minute 27 de chaque heure (UTC, sans garantie de ponctualité). Le script utilise des créneaux UTC pour ne charger que les sources dues : inventaire et air chaque heure, eau et Géorisques chaque jour, trafic et IREP chaque mois. Une exécution manuelle peut forcer un groupe ou toutes les sources. Il faut réactiver un workflow public si GitHub le désactive après une longue période d’inactivité.
+GitHub Actions est programmé aux minutes 27 et 57 de chaque heure (UTC, sans garantie de ponctualité). Ces deux opportunités réduisent la dépendance à un déclenchement unique ; les créneaux UTC de l’importeur évitent les requêtes en double. Inventaire et air sont chargés chaque heure, eau et Géorisques chaque jour, trafic et IREP chaque mois. Après un échec, une nouvelle tentative est permise au prochain créneau horaire, sans attendre le lendemain ou le mois suivant. Une exécution manuelle peut forcer un groupe ou toutes les sources. Il faut réactiver un workflow public si GitHub le désactive après une longue période d’inactivité.
+
+Diagnostic du 10 octobre 2026 : les runs programmés étaient créés à plusieurs heures d’intervalle, alors que le job du run `38011667624` démarrait quatre secondes après sa création et terminait en moins de deux minutes. Le retard observé précède donc les jobs d’import, et non leur groupe de concurrence. [GitHub documente les retards et suppressions possibles des déclenchements programmés](https://docs.github.com/en/actions/how-tos/troubleshoot-workflows). Le second déclenchement est une atténuation, pas une garantie. Une cadence horaire fiable nécessiterait un ordonnanceur externe déclenchant `workflow_dispatch` ; aucun nouveau service ni secret n’est configuré ici.
 
 Chaque import valide et réduit la réponse du fournisseur avant publication. Un échec conserve le dernier fichier valide et sa date de réussite. Un échec initial ne crée pas de faux tableau vide. Pour la baignade, les saisons valides sont publiées indépendamment des saisons indisponibles ; les résultats antérieurs des saisons en échec sont conservés, avec un avertissement. Aucun résultat n’est inventé. Les checkpoints préservent les sources déjà validées en cas d’interruption.
 
@@ -52,6 +54,8 @@ Les six imports réutilisent les checkpoints, licences par jeu, hash des observa
 ## Contrat v1
 
 `manifest.json` contient `schemaVersion`, `checkedAt` et `datasets`. Chaque entrée renseigne la source, l’intervalle, la dernière tentative, la dernière réussite complète, le statut et le chemin du dernier fichier disponible. Un import partiel a un chemin mais un statut d’erreur ; `lastPublishedAt` n’est pas une réussite complète. Un import initial en échec n’a pas de chemin.
+
+Les détails d’eaux souterraines absents du dernier catalogue validé portent `retiredAt`. Leurs snapshots et dates restent conservés et consultables, mais ils sont exclus des imports planifiés et du suivi des retards. Une réapparition dans un catalogue valide réactive le détail. Un échec de catalogue, une réponse partielle ou vide ne peut pas retirer de stations.
 
 `data/<identifiant>.json` contient `{ schemaVersion: 1, key, data }`. `hash` représente les observations normalisées, hors dates d’import. Le consommateur peut l’utiliser comme paramètre de cache. Les dates de prélèvement, périodes horaires/journalières, unités, qualifications, limites de résultats et précision des coordonnées sont conservées. Une réussite de téléchargement ne signifie jamais que la mesure est récente.
 

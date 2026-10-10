@@ -49,6 +49,40 @@ test("concurrent source checkpoints retain all sources", async () => {
     assert.equal(Object.keys(JSON.parse(await readFile(join(dir, "manifest.json"))).datasets).length, 20);
   } finally { await rm(dir, { recursive: true }); }
 });
+test("failed daily and monthly imports retry hourly without hammering providers", () => {
+  const entry = { status: "error", lastAttemptAt: "2026-10-01T00:10:00Z" };
+  for (const hours of [1, 24, 720]) {
+    assert.equal(isDue(entry, hours, Date.parse("2026-10-01T00:57:00Z")), false);
+    assert.equal(isDue(entry, hours, Date.parse("2026-10-01T01:27:00Z")), true);
+  }
+  assert.equal(isDue({ ...entry, status: "ok" }, 720, Date.parse("2026-10-10T00:27:00Z")), false);
+  assert.equal(isDue({ ...entry, retiredAt: "2026-10-02T00:00:00Z" }, 24, Date.parse("2026-10-10T00:27:00Z")), false);
+});
+test("validated catalogues retire missing details without deleting snapshots and reactivate returning stations", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "atlas-store-test-"));
+  try {
+    const store = await openStore(dir, "2026-10-10T20:00:00Z");
+    await store.update("groundwater", "provider", 24, async () => ({ stations: [{ id: "active" }] }));
+    for (const key of ["groundwater-active", "groundwater-old", "river-other"]) await store.update(key, "provider", 24, async () => ({ analyses: [1] }));
+    const saved = await readFile(join(dir, "data/groundwater-old.json"), "utf8");
+    await store.reconcileCatalogue("groundwater", "groundwater-", ["groundwater-active"]);
+    assert.equal(store.manifest.datasets["groundwater-old"].retiredAt, "2026-10-10T20:00:00Z");
+    assert.equal(store.manifest.datasets["groundwater-active"].retiredAt, undefined);
+    assert.equal(store.manifest.datasets["river-other"].retiredAt, undefined);
+    assert.equal(await readFile(join(dir, "data/groundwater-old.json"), "utf8"), saved);
+    assert.ok(JSON.parse(await readFile(join(dir, "manifest.json"))).datasets["groundwater-old"].retiredAt);
+    await store.reconcileCatalogue("groundwater", "groundwater-", ["groundwater-active", "groundwater-old"]);
+    assert.equal(store.manifest.datasets["groundwater-old"].retiredAt, undefined);
+    await store.reconcileCatalogue("groundwater", "groundwater-", []);
+    assert.equal(store.manifest.datasets["groundwater-old"].retiredAt, undefined, "empty fallback must not retire stations");
+    await store.update("groundwater", "provider", 24, async () => ({ stations: [{ id: "active" }] }), () => "partial");
+    await store.reconcileCatalogue("groundwater", "groundwater-", ["groundwater-active"]);
+    assert.equal(store.manifest.datasets["groundwater-old"].retiredAt, undefined, "partial catalogue must not retire stations");
+    await store.update("groundwater", "provider", 24, async () => { throw new Error("catalogue unavailable"); });
+    await store.reconcileCatalogue("groundwater", "groundwater-", ["groundwater-active"]);
+    assert.equal(store.manifest.datasets["groundwater-old"].retiredAt, undefined, "failed catalogue must not retire stations");
+  } finally { await rm(dir, { recursive: true }); }
+});
 test("partial publication never claims complete success", async () => {
   const dir = await mkdtemp(join(tmpdir(), "atlas-store-test-"));
   try {

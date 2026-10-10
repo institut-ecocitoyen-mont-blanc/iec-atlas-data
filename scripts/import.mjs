@@ -111,6 +111,7 @@ await update("bathing", "water", 24, "https://baignades.sante.gouv.fr/baignades/
   if (data.points.some((p) => p.seasons.some((s) => s.error))) return "partial";
 });
 const groundwater = await update("groundwater", "water", 24, GROUNDWATER_SOURCE, loadGroundwaterCatalogue, (data) => { valid(data); nonempty(data.stations); });
+await store.reconcileCatalogue("groundwater", "groundwater-", (groundwater?.stations ?? []).map((station) => `groundwater-${station.id.toLowerCase()}`));
 // Bounded concurrency, one small history window per published station, never national downloads.
 let cursor = 0;
 await Promise.all(Array.from({ length: 3 }, async () => {
@@ -134,7 +135,7 @@ for (const { id } of ATMO_MODELS) {
 }
 const failures = await store.save();
 if (process.env.GITHUB_STEP_SUMMARY) {
-  const lines = Object.entries(store.manifest.datasets).map(([key, d]) => `| ${key} | ${d.status} | ${d.lastSuccessAt ?? "never"} |`);
+  const lines = Object.entries(store.manifest.datasets).filter(([, d]) => !d.retiredAt).map(([key, d]) => `| ${key} | ${d.status} | ${d.lastSuccessAt ?? "never"} |`);
   await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Atlas import\n\n${failures} failed imports; previous successful snapshots retained.\n\n| Dataset | Status | Last successful import |\n|---|---|---|\n${lines.join("\n")}\n`);
 }
 // Publication must run even on provider failures; workflow reports failure afterwards.
