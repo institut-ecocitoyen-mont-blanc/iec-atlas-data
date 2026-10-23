@@ -62,7 +62,12 @@ export function parseRoadTraffic(xml: string, currentYear = new Date().getUTCFul
     const percentRaw = field(member, `PCT_PL_${suffix}`);
     const percent = /^\d+(?:\.\d+)?$/.test(percentRaw) ? Number(percentRaw) : NaN;
     const heavyVehiclesPercent = vehicles !== null && percent >= 0 && percent <= 100 ? percent : null;
-    segments.push({ id, sourceId, road: road as TrafficRoad, name: sourceId ? `Point de comptage ${point || sourceId}` : "Tronçon sans point de comptage", paths, vehicles, year, heavyVehiclesPercent, countingType });
+    const history = [...new Set(years)].sort((a,b) => b-a).map(year => {
+      const suffix = String(year).slice(-2), vehicles = positiveNumber(field(member, `TMJA_${suffix}`));
+      const raw = field(member, `PCT_PL_${suffix}`), percent = /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : NaN;
+      return { year, vehicles, heavyVehiclesPercent: vehicles !== null && percent >= 0 && percent <= 100 ? percent : null };
+    });
+    segments.push({ id, sourceId, road: road as TrafficRoad, name: sourceId ? `Point de comptage ${point || sourceId}` : "Tronçon sans point de comptage", paths, vehicles, year, heavyVehiclesPercent, countingType, history });
   }
   if (!segments.length) throw new Error("Aucune des routes demandées n’est disponible.");
   return { segments, year };

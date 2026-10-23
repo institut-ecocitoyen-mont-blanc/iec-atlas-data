@@ -13,9 +13,9 @@ test("Geod’air rights stay separate from regional ODbL", () => {
   }
   assert.equal(rightsForDataset("air-pm25").license.id, "ODbL-1.0");
 });
-test("secret is supplied only through the workflow import environment", async () => {
+test("secret is supplied only through the two server-side importer environments", async () => {
   const workflow = await readFile(new URL("../.github/workflows/import.yml", import.meta.url), "utf8");
-  assert.equal((workflow.match(/secrets\.GEODAIR_API_KEY/g) || []).length, 1);
+  assert.equal((workflow.match(/secrets\.GEODAIR_API_KEY/g) || []).length, 2);
   assert.match(workflow, /GEODAIR_API_KEY: \$\{\{ secrets.GEODAIR_API_KEY \}\}/);
   assert.ok(!workflow.includes("NEXT_PUBLIC_GEODAIR"));
 });

@@ -24,11 +24,11 @@ concurrency:
 jobs:
   import:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 90
     permissions:
       contents: write
     outputs:
-      result: ${{ steps.import.outcome }}
+      result: ${{ (steps.import.outcome == 'failure' || steps.history.outcome == 'failure') && 'failure' || 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,6 +44,14 @@ jobs:
           IMPORT_MODE: ${{ inputs.mode || 'due' }}
           GEODAIR_API_KEY: ${{ secrets.GEODAIR_API_KEY }}
         run: npm run import
+      - run: npm run check
+      - name: Backfill historical partitions (resumes on the next run)
+        id: history
+        continue-on-error: true
+        env:
+          GEODAIR_API_KEY: ${{ secrets.GEODAIR_API_KEY }}
+          HISTORY_TASK_BUDGET: '8'
+        run: npm run backfill
       - run: npm run check
       - name: Retain datasets and import status
         run: |

@@ -3,7 +3,7 @@ import type { Quality } from "./environmental-quality";
 export interface RiverAssessment {
   stationId: string; year: number; nature: string; ecological: string; potential: string; chemical: string; chemicalDowngraders: string;
 }
-export interface RiverAssessments { stations: Record<string, RiverAssessment>; fetchedAt: string | null; error?: string }
+export interface RiverAssessments { stations: Record<string, RiverAssessment>; history?: RiverAssessment[]; fetchedAt: string | null; error?: string }
 export const riverAssessmentUrl = (id: string) => `https://www.rhone-mediterranee.eaufrance.fr/station-${encodeURIComponent(id)}`;
 const labels: Record<string, string> = { TBE: "Très bon", BE: "Bon", MOY: "Moyen", MED: "Médiocre", MAUV: "Mauvais" };
 export function riverQuality(assessment?: RiverAssessment): Quality {

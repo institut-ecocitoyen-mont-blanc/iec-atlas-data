@@ -1,10 +1,11 @@
 import { appendFile } from "node:fs/promises";
+import { acquireImportLock } from './import-lock.mjs';
 import { openStore, isDue, readJson } from "./store.mjs";
 import { fetchAllPollutionSites } from "../src/lib/google-sheets.ts";
 import { clipAtlasInventory } from "../src/atlas/lib/atlas-inventory.ts";
 import { AREA, loadLayer, fetchJson, rows, analysisUrl } from "../src/atlas/lib/environmental-layers.ts";
 import { AIR_POLLUTANTS, ATMO_SERVICE, loadAirStations } from "../src/atlas/lib/atmo-stations.ts";
-import { loadBathingWater } from "../src/atlas/lib/bathing-water-source.ts";
+import { loadBathingHistory } from "../src/atlas/lib/bathing-water-source.ts";
 import { loadRiverAssessments, RIVER_EXPORT_URL } from "../src/atlas/lib/river-assessments-source.ts";
 import { loadRoadTraffic, roadTrafficUrl } from "../src/atlas/lib/road-traffic-source.ts";
 import { loadIndustrialEmissions, IREP_CATALOGUE_URL } from "../src/atlas/lib/industrial-emissions-source.ts";
@@ -20,24 +21,28 @@ import { loadAtmoModelExport } from "./atmo-model-export.mjs";
 import { loadGeodairHourly, loadGeodairHistory } from "../src/atlas/lib/geodair-source.ts";
 import { GEODAIR_SOURCE } from "../src/atlas/lib/geodair.ts";
 import { loadAtmoIndex, ATMO_INDEX_WFS } from "../src/atlas/lib/atmo-index-source.ts";
+import { loadWaterHistory, loadHubeauCatalogue } from "../src/atlas/lib/hubeau-history.ts";
 
 const mode = process.env.IMPORT_MODE || "due";
+acquireImportLock();
 if (!["due", "all", "hourly", "water", "annual", "georisques", "bathing", "overlays", "geodair", "atmo-index"].includes(mode)) throw new Error("Invalid import mode");
 const store = await openStore("public");
 const signal = () => AbortSignal.timeout(60000);
 const valid = (data) => { if (!data || data.error || data.fetchedAt === null) throw new Error("Invalid or incomplete dataset"); };
 const nonempty = (data) => { if (!Array.isArray(data) || !data.length) throw new Error("Unexpected empty catalogue"); };
 function due(key, group, hours) { return mode === "all" || mode === group || mode === key || mode === "due" && isDue(store.manifest.datasets[key], hours); }
-async function update(key, group, hours, source, loader, validate = valid) {
+async function update(key, group, hours, source, loader, validate = valid, archiveField) {
   if (!due(key, group, hours)) {
     const path = store.manifest.datasets[key]?.path;
     return path ? (await readJson(`public/${path}`, null))?.data : undefined;
   }
-  return store.update(key, source, hours, loader, validate);
+  return store.update(key, source, hours, loader, validate, archiveField);
 }
 // All requests have a deadline, including the shared inventory importer.
 const upstreamFetch = globalThis.fetch;
-globalThis.fetch = (url, init = {}) => upstreamFetch(url, { ...init, signal: AbortSignal.any([AbortSignal.timeout(60000), ...(init.signal ? [init.signal] : [])]) });
+// Leave time for checkpoint commit/publication even during widespread outages.
+const runDeadline = AbortSignal.timeout(40 * 60000);
+globalThis.fetch = (url, init = {}) => upstreamFetch(url, { ...init, signal: AbortSignal.any([runDeadline, AbortSignal.timeout(60000), ...(init.signal ? [init.signal] : [])]) });
 
 await update("inventory", "hourly", 1, "https://docs.google.com/spreadsheets/d/1diIR2EXPf2QfkxUw-T0r3CRjinhcJVnnNH5azd0QxZg", async () => clipAtlasInventory(await fetchAllPollutionSites()), (data) => { valid(data); nonempty(data.sites); });
 for (const { id } of AIR_POLLUTANTS) {
@@ -61,14 +66,14 @@ await update("river-assessments", "water", 24, RIVER_EXPORT_URL, async () => {
   valid(data);
   const points = rivers?.points ?? await loadLayer("rivers", signal());
   const ids = new Set(points.map((p) => p.id));
-  return { ...data, stations: Object.fromEntries(Object.entries(data.stations).filter(([id]) => ids.has(id))) };
+  return { ...data, history: (data.history ?? []).filter(r => ids.has(r.stationId)), stations: Object.fromEntries(Object.entries(data.stations).filter(([id]) => ids.has(id))) };
 });
 for (const point of rivers?.points ?? []) {
   await update(`river-${point.id.toLowerCase()}`, "water", 24, analysisUrl("rivers", point.id), async () => {
-    const data = rows(await fetchJson(analysisUrl("rivers", point.id), signal(), 3));
+    const data = await loadWaterHistory("rivers", point.id, AbortSignal.timeout(600000));
     if (data.some((r) => String(r.code_station) !== point.id)) throw new Error("Station mismatch");
     return data;
-  }, (data) => { if (!Array.isArray(data)) throw new Error("Invalid results"); });
+  }, (data) => { if (!Array.isArray(data)) throw new Error("Invalid results"); }, '$');
 }
 
 const drinking = await update("drinking", "water", 24, water, async () => {
@@ -77,6 +82,9 @@ const drinking = await update("drinking", "water", 24, water, async () => {
   return { points: points.filter((p) => codes.has(p.id)), fetchedAt: new Date().toISOString() };
 }, (data) => { valid(data); nonempty(data.points); });
 if (drinking) {
+  const catalogue = await update('drinking-network-catalogue', 'water', 24, water, () => loadHubeauCatalogue(`https://hubeau.eaufrance.fr/api/v1/qualite_eau_potable/communes_udi?code_commune=${CCPMB_COMMUNES.map(c => c.code).join(',')}&size=1000`, AbortSignal.timeout(300000)), data => {
+    if (!Array.isArray(data) || !data.length || data.some(row => !CCPMB_COMMUNES.some(c => c.code === row.code_commune) || !/^\d{9}$/.test(String(row.code_reseau)))) throw new Error('Invalid historical networks');
+  });
   const summaries = await update("drinking-summaries", "water", 24, water, async () => {
     const result = {};
     let failed = false;
@@ -86,19 +94,24 @@ if (drinking) {
     if (failed || Object.keys(result).length !== drinking.points.length) throw new Error("Incomplete networks");
     return result;
   });
-  const ids = new Set(Object.values(summaries ?? {}).flatMap((s) => s.networks.map((n) => n.id)));
+  const ids = new Set([...Object.values(summaries ?? {}).flatMap((s) => s.networks.map((n) => n.id)), ...(catalogue ?? []).map(row => String(row.code_reseau))]);
   for (const id of ids) {
     await update(`drinking-${id}`, "water", 24, analysisUrl("drinking", id), async () => {
-      const data = rows(await fetchJson(analysisUrl("drinking", id), signal(), 3));
+      const data = await loadWaterHistory("drinking", id, AbortSignal.timeout(600000));
       if (data.some((r) => !r.reseaux?.some((n) => String(n.code) === id))) throw new Error("Network mismatch");
       return data;
-    }, (data) => { if (!Array.isArray(data)) throw new Error("Invalid results"); });
+    }, (data) => { if (!Array.isArray(data)) throw new Error("Invalid results"); }, '$');
   }
 }
 
 await update("bathing", "water", 24, "https://baignades.sante.gouv.fr/baignades/", async () => {
-  const data = await loadBathingWater();
+  const data = await loadBathingHistory();
   const previous = (await readJson("public/data/bathing.json", null))?.data;
+  for (const point of data.points) {
+    const old = previous?.points.find((p) => p.id === point.id);
+    for (const season of old?.seasons ?? []) if (!point.seasons.some(s => s.year === season.year)) point.seasons.push(season);
+    point.seasons.sort((a, b) => b.year - a.year);
+  }
   for (const point of data.points) for (const season of point.seasons) {
     if (!season.error) continue;
     const old = previous?.points.find((p) => p.id === point.id)?.seasons.find((s) => s.year === season.year);
@@ -112,12 +125,12 @@ await update("bathing", "water", 24, "https://baignades.sante.gouv.fr/baignades/
 });
 const groundwater = await update("groundwater", "water", 24, GROUNDWATER_SOURCE, loadGroundwaterCatalogue, (data) => { valid(data); nonempty(data.stations); });
 await store.reconcileCatalogue("groundwater", "groundwater-", (groundwater?.stations ?? []).map((station) => `groundwater-${station.id.toLowerCase()}`));
-// Bounded concurrency, one small history window per published station, never national downloads.
+// Bounded concurrency, complete local histories, never national downloads.
 let cursor = 0;
 await Promise.all(Array.from({ length: 3 }, async () => {
   while (cursor < (groundwater?.stations.length ?? 0)) {
     const station = groundwater.stations[cursor++];
-    await update(`groundwater-${station.id.toLowerCase()}`, "water", 24, GROUNDWATER_SOURCE, () => loadGroundwaterAnalyses(station, signal()), (data) => { if (!Array.isArray(data.analyses)) throw new Error("Invalid analyses"); });
+    await update(`groundwater-${station.id.toLowerCase()}`, "water", 24, GROUNDWATER_SOURCE, () => loadGroundwaterAnalyses(station, AbortSignal.timeout(600000)), (data) => { if (!Array.isArray(data.analyses) || data.more || data.total !== data.analyses.length) throw new Error("Incomplete analyses"); }, 'analyses');
   }
 }));
 await update("traffic", "annual", 24 * 30, roadTrafficUrl(), loadRoadTraffic);

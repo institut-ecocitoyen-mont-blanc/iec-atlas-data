@@ -37,7 +37,7 @@ test("all new snapshots have dataset-specific rights and provenance", () => {
   for (const id of ["pm25", "pm10", "no2", "o3"]) {
     const rights = rightsForDataset(`atmo-model-${id}`);
     assert.equal(rights.license.id, "ODbL-1.0");
-    assert.match(rights.attribution, /Cartes annuelles 2025/);
+    assert.match(rights.attribution, /Cartes annuelles/);
     assert.match(rights.transformations, /4096/);
   }
 });

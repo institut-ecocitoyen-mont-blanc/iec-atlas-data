@@ -29,14 +29,14 @@ export function substanceSummaries(rows: readonly PurchaseRow[]) {
     .sort((a, b) => (b.quantity ?? -1) - (a.quantity ?? -1) || a.name.localeCompare(b.name, "fr"));
 }
 export function pesticideUrl(page = 1) {
-  return `${PESTICIDE_API}?${new URLSearchParams({ type_territoire: "Zone postale", code_territoire: PESTICIDE_ZONES.map(({ code }) => code).join(","), annee_min: "2013", size: "1000", page: String(page), sort: "desc" })}`;
+  return `${PESTICIDE_API}?${new URLSearchParams({ type_territoire: "Zone postale", code_territoire: PESTICIDE_ZONES.map(({ code }) => code).join(","), size: "1000", page: String(page), sort: "desc" })}`;
 }
 export function parsePurchasePage(value: unknown): { rows: PurchaseRow[]; count: number; more: boolean } {
   const page = value as { data?: Record<string, unknown>[]; count?: number; next?: unknown } | null;
   if (!page || !Array.isArray(page.data) || !Number.isSafeInteger(page.count) || page.count! < 0 || !(page.next === null || typeof page.next === "string")) throw new Error("Réponse Hub’Eau incomplète ou incompatible.");
   const text = (value: unknown) => typeof value === "string" && value.trim() && value !== "-" ? value.trim() : "";
   const rows = page.data.map((row): PurchaseRow => {
-    if (!row || row.type_territoire !== "Zone postale" || !PESTICIDE_ZONES.some(({ code }) => code === row.code_territoire) || !Number.isInteger(row.annee) || Number(row.annee) < 2013 || Number(row.annee) > new Date().getFullYear()) throw new Error("Périmètre ou année inattendus dans les achats Hub’Eau.");
+    if (!row || row.type_territoire !== "Zone postale" || !PESTICIDE_ZONES.some(({ code }) => code === row.code_territoire) || !Number.isInteger(row.annee) || Number(row.annee) < 1900 || Number(row.annee) > new Date().getFullYear()) throw new Error("Périmètre ou année inattendus dans les achats Hub’Eau.");
     const substance = text(row.libelle_substance);
     if (!substance) throw new Error("Substance manquante dans les achats Hub’Eau.");
     // Never turn confidential, absent or invalid quantities into zero.
@@ -51,7 +51,7 @@ export async function loadPesticidePurchases(signal: AbortSignal, refresh = fals
   const rows: PurchaseRow[] = [];
   let expected: number | undefined;
   const boundedSignal = AbortSignal.any([signal, AbortSignal.timeout(60000)]);
-  for (let page = 1; page <= 100; page++) {
+  for (let page = 1; ; page++) {
     // Build HTTPS paging URLs ourselves: the provider's next links use HTTP.
     const response = await fetch(pesticideUrl(page), { signal: boundedSignal });
     if (!response.ok) throw new Error(`Hub’Eau est indisponible (${response.status}).`);
@@ -67,7 +67,6 @@ export async function loadPesticidePurchases(signal: AbortSignal, refresh = fals
       return cached;
     }
   }
-  throw new Error("Trop de pages d’achats. Chargement interrompu pour éviter un total incomplet.");
 }
 
 // Descriptive mass bands, not exposure, toxicity or health thresholds.

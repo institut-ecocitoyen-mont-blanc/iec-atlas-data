@@ -12,7 +12,7 @@ GitHub Actions est programmé aux minutes 27 et 57 de chaque heure (UTC, sans ga
 
 Diagnostic du 10 octobre 2026 : les runs programmés étaient créés à plusieurs heures d’intervalle, alors que le job du run `38011667624` démarrait quatre secondes après sa création et terminait en moins de deux minutes. Le retard observé précède donc les jobs d’import, et non leur groupe de concurrence. [GitHub documente les retards et suppressions possibles des déclenchements programmés](https://docs.github.com/en/actions/how-tos/troubleshoot-workflows). Le second déclenchement est une atténuation, pas une garantie. Une cadence horaire fiable nécessiterait un ordonnanceur externe déclenchant `workflow_dispatch` ; aucun nouveau service ni secret n’est configuré ici.
 
-Chaque import valide et réduit la réponse du fournisseur avant publication. Un échec conserve le dernier fichier valide et sa date de réussite. Un échec initial ne crée pas de faux tableau vide. Pour la baignade, les saisons valides sont publiées indépendamment des saisons indisponibles ; les résultats antérieurs des saisons en échec sont conservés, avec un avertissement. Aucun résultat n’est inventé. Les checkpoints préservent les sources déjà validées en cas d’interruption.
+Chaque import valide la réponse du fournisseur avant publication. Un échec conserve le dernier fichier valide et sa date de réussite. Un échec initial ne crée pas de faux tableau vide. Pour la baignade historique, toutes les saisons découvertes doivent être récupérées avant remplacement de l’export précédent. Aucun résultat n’est inventé. Les checkpoints préservent les sources déjà validées en cas d’interruption.
 
 Le workflow commit les données normalisées uniquement lorsqu’elles changent ; le manifest d’exploitation est mis à jour à chaque exécution. Il publie ensuite l’ensemble via GitHub Pages, puis signale les erreurs fournisseur dans un job en échec. Activer les notifications d’échec Actions dans les préférences GitHub des mainteneurs. L’atlas signale aussi les imports en retard ; il ne peut pas réveiller un ordonnanceur GitHub arrêté.
 
@@ -24,7 +24,7 @@ La publication Pages est indépendante du site principal. L’atlas charge ces f
 
 ### Geod’air : station Passy
 
-Le secret Actions `GEODAIR_API_KEY` est transmis uniquement à l’étape d’import, dans l’en-tête `apikey` du domaine officiel Geod’air. Il n’est jamais publié ni transmis au navigateur. Le groupe manuel `geodair` charge les deux exports ; même les modes forcés respectent une tentative par créneau UTC d’une heure. Ne pas lancer des imports locaux et CI avec la même clé dans le même créneau.
+Le secret Actions `GEODAIR_API_KEY` est transmis uniquement aux étapes d’import et de reprise historique, dans l’en-tête `apikey` du domaine officiel Geod’air. Il n’est jamais publié ni transmis au navigateur. Le groupe manuel `geodair` charge les deux exports ; même les modes forcés respectent une tentative par créneau UTC d’une heure. Ne pas lancer des imports locaux et CI avec la même clé dans le même créneau.
 
 - `geodair-hourly` : station FR33220, fenêtre glissante de sept jours, PM₂.₅, PM₁₀, NO₂, O₃, NO et NOₓ, chaque heure.
 - `geodair-history` : moyennes annuelles depuis 2013 jusqu’à la dernière année complète et prélèvements de benzo[a]pyrène depuis le début de l’année précédente, chaque mois.
@@ -59,7 +59,27 @@ Les détails d’eaux souterraines absents du dernier catalogue validé portent 
 
 `data/<identifiant>.json` contient `{ schemaVersion: 1, key, data }`. `hash` représente les observations normalisées, hors dates d’import. Le consommateur peut l’utiliser comme paramètre de cache. Les dates de prélèvement, périodes horaires/journalières, unités, qualifications, limites de résultats et précision des coordonnées sont conservées. Une réussite de téléchargement ne signifie jamais que la mesure est récente.
 
-Les fichiers de détail sont chargés à la demande : `river-<id>` et `drinking-<réseau>` (10 résultats maximum), `groundwater-<id>` (200 résultats maximum). Ce ne sont pas des historiques exhaustifs. Les résultats nuls/non quantifiés ne sont pas convertis en zéros. Les captages publics volontairement géolocalisés au chef-lieu restent approximatifs.
+Les analyses `river-<id>`, `drinking-<réseau>` et `groundwater-<id>` sont importées sur toute la période accessible, sans limite de rétention de 10/200 résultats. La taille de page n’est plus une limite de collecte. Les dates extrêmes et le décompte global sont vérifiés ; les plages volumineuses sont divisées par dates avant pagination. Les bornes de fin Hub’Eau, tronquées à minuit pour les nappes et l’eau potable, sont demandées au jour suivant puis filtrées sans recouvrement. Chaque page doit être complète et rester dans le périmètre. Une erreur de page, une pagination répétée ou un décompte modifié rejette la mise à jour entière et conserve l’export précédent. Les réseaux historiques, même absents de la desserte actuelle, sont identifiés dans `drinking-network-catalogue` et archivés sans les ajouter à la desserte actuelle des communes.
+
+Les fichiers gardent une petite propriété `data` compatible avec les anciennes versions du site. **Cette propriété est un aperçu, pas l’export complet** : l’enveloppe `archive` donne la liste ordonnée des fragments gzip immuables `history/<clé>/<sha256>.json.gz`, leur SHA-256 et leur décompte. `field: "$"` remplace le tableau `data`, `field: "analyses"` ou `"records"` remplace cette propriété de `data`. Le consommateur doit lire tous les fragments et vérifier leurs totaux. Le site charge les fragments à l’ouverture d’une fiche ; la pagination de présentation ne supprime aucun résultat. Les enregistrements source des nappes sont conservés dans `source`, y compris méthodes, seuils et qualifications. Valeurs nulles/non quantifiées jamais converties en zéros ; coordonnées protégées jamais précisées artificiellement.
+
+### Reprise de tout l’historique (octobre 2026)
+
+`npm run backfill` maintient `history-catalogue.json`, avec **toutes les partitions découvertes** et leurs états pending/ok/error/credentials-required. Le workflow exécute jusqu’à huit partitions par passage (`HISTORY_TASK_BUDGET`), puis reprend les travaux les moins récemment tentés. Il s’agit d’un budget d’exécution, pas d’une coupure historique. Les dates de réussite, erreurs et partitions non encore importées restent explicites. Une première migration n’est complète que lorsque le catalogue ne signale plus de partitions manquantes/échouées ni d’échecs de découverte.
+
+- **Eaux** : toutes les analyses disponibles des stations et réseaux locaux ; les dix communes restent la limite géographique, pas une limite de dates. Relecture complète quotidienne pour prendre en compte corrections et retraits source.
+- **Air régional** : toutes les espèces et lignes horaires/journalières exposées par les deux catalogues ArcGIS, sur les stations locales. Périodes et données brutes archivées séparément de la synthèse utilisée par la carte. Un fournisseur peut lui-même ne publier qu’une fenêtre ; l’import ne prétend pas récupérer une période absente.
+- **Geod’air** : partitions horaires mensuelles depuis le début documenté (2013), statistiques annuelles et analyses différées par année, avec lignes et colonnes source conservées même pour les polluants anciens/valeurs invalides. Clé serveur uniquement ; pas de répétition d’une même partition dans le créneau horaire. Sans secret local, les partitions restent explicitement en attente de credentials, pas faussement vides.
+- **Indices Atmo** : toute la table communale accessible, indépendamment de la fenêtre veille/aujourd’hui/demain utilisée pour colorer les pins.
+- **Baignade** : toutes les saisons du sélecteur officiel de chaque site (2022–2026 lors du contrôle), pas seulement deux saisons. Les saisons déjà archivées restent conservées si elles disparaissent du sélecteur. Une découverte ou une saison indisponible ne remplace pas le dernier export complet.
+- **IREP** : toutes les archives annuelles annoncées depuis 2003, conservées sous `emissions-<année>` ; le résumé courant garde sa clé `emissions`.
+- **Trafic** : toutes les colonnes annuelles TMJA/poids lourds du WFS sont conservées dans `segments[].history` ; le résumé et la géométrie continuent de représenter l’édition actuelle du fournisseur, pas une reconstitution des tracés historiques.
+- **Évaluations AERMC** : toutes les lignes/années de l’export courant sont conservées dans `history`, distinctes du dernier état par station.
+- **Modèles Atmo** : découverte des éditions WMS disponibles pour les indicateurs annuels PM₂.₅/PM₁₀/NO₂ et dépassements O₃ ; archive du rendu local et de sa propre légende. Ni assimilation des périodes O₃ ni réutilisation de la légende 2025 pour une autre édition. Ce sont toujours des rendus, pas des grilles numériques GeoTIFF.
+- **Cerema et achats de pesticides** : tous les mois/années exposés par leurs sources, sans restriction de période côté achats.
+- **Inventaire et Géorisques** : les services utilisés fournissent un état courant, pas un historique reconstituable. Chaque version désormais observée est conservée, sans inventer les versions antérieures.
+
+Chaque changement de contenu garde aussi une révision immuable sous `revisions/<clé>/`, indexée par `index.json`. Cela protège l’historique local des changements de fenêtre ou suppressions source ; une révision archivée n’est pas pour autant une donnée encore validée par le fournisseur. Les contrôles de publication vérifient les fragments et leurs hashes. Les extractions ne sont publiées qu’après validation ; un échec n’est jamais assimilé à l’absence de pollution.
 
 ## Sources et limites
 
@@ -73,7 +93,7 @@ Le groupe manuel `bathing` force uniquement les pages de baignade. Le portail pe
 | Air | Atmo AURA ArcGIS horaire, complément journalier Sallanches Régie / Passy Chedde |
 | Cours d’eau | Hub’Eau / Naïades ; évaluations officielles AERMC via export CSV |
 | Eau potable | Hub’Eau, réseaux de distribution et contrôles ARS |
-| Baignade | Portail du ministère de la Santé, deux dernières saisons |
+| Baignade | Portail du ministère de la Santé, toutes les saisons disponibles |
 | Eaux souterraines | Hub’Eau / ADES, catalogue et analyses vérifiées |
 | Trafic | DDT74 / GeoIDE, géométrie et moyenne annuelle |
 | Rejets industriels | Archives annuelles IREP, établissements locaux |
@@ -88,7 +108,7 @@ Les bases dérivées `public/data/air-*.json` sont mises à disposition sous [Op
 
 L’Institut a sélectionné le périmètre CCPMB et normalisé les champs sans modifier les mesures. Les fichiers complets de cet extrait dérivé sont téléchargeables librement depuis le manifest. Conserver cette attribution et la licence, et distribuer les bases adaptées sous ODbL conformément à ses conditions. Atmo ne garantit pas les usages de mesures ultérieurement invalidées : les dates et statuts de validation sont préservés. Les autres bases indépendantes et le logiciel ne sont pas placés sous ODbL par cette notice.
 
-Le dépôt conserve seulement des fenêtres locales bornées, pas une archive nationale. Surveiller la taille de l’historique Git ; pour un historique scientifique étendu, utiliser un stockage d’objets plutôt que d’accumuler de gros exports dans Git.
+Le dépôt conserve des historiques locaux compressés, pas une archive nationale. Surveiller leur croissance et celle des révisions Git ; migrer vers du stockage objet si les limites de GitHub Pages/Git deviennent contraignantes. Ne jamais résoudre un problème de taille en tronquant silencieusement les mesures.
 
 ## Développement
 
@@ -99,6 +119,7 @@ npm ci
 npm test
 npm run import                   # seulement les sources dues
 IMPORT_MODE=water npm run import # forcer les imports quotidiens
+npm run backfill                # reprendre le prochain lot historique
 npm run check
 ```
 

@@ -90,7 +90,7 @@ async function responseText(response: Response) {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Réponse Geod’air absente.");
   const decoder = new TextDecoder(); let bytes = 0, body = "";
-  try { for (;;) { const { done, value } = await reader.read(); if (done) return body + decoder.decode(); bytes += value.length; if (bytes > 2_000_000) throw new Error("Réponse Geod’air trop volumineuse."); body += decoder.decode(value, { stream: true }); } }
+  try { for (;;) { const { done, value } = await reader.read(); if (done) return body + decoder.decode(); bytes += value.length; if (bytes > 32_000_000) throw new Error("Réponse Geod’air trop volumineuse."); body += decoder.decode(value, { stream: true }); } }
   finally { await reader.cancel(); }
 }
 export async function geodairExport(key: string, params: Record<string, string>, fetcher: typeof fetch = fetch, pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))) {
@@ -103,11 +103,30 @@ export async function geodairExport(key: string, params: Record<string, string>,
   for (let attempt = 0; attempt < 5; attempt++) {
     const response = await fetcher(`https://www.geodair.fr/api-ext/download?${new URLSearchParams({ id })}`, init);
     if (response.status === 200) return responseText(response);
+    if (response.status === 204) return ""; // Explicit no-observation interval, not an outage.
     await response.body?.cancel();
     if (response.status !== 412) throw new Error(`Téléchargement Geod’air HTTP ${response.status}.`);
     await pause(1000 * (attempt + 1)); signal.throwIfAborted();
   }
   throw new Error("Export Geod’air non terminé.");
+}
+
+// Historical exports retain all source columns and species, including obsolete
+// instruments and invalid readings. The compact current UI parser remains stricter.
+export function parseGeodairArchive(csv: string, from: number, to: number) {
+  if (csv === "") return [];
+  const result = parse(csv, { bom: true, delimiter: ";", skip_empty_lines: true, columns: true }) as Row[];
+  if (!result.length || required.some(key => !(key in result[0]))) throw new Error("Invalid historical Geod’air CSV");
+  return result.filter(row => {
+    if (row["code site"] !== GEODAIR_STATION) throw new Error("Unexpected historical station");
+    const time = geodairTime(row["Date de début"]), end = geodairTime(row["Date de fin"]);
+    if (end <= time) throw new Error("Invalid historical interval");
+    return time >= from && end <= to;
+  });
+}
+export async function loadGeodairArchive(key: string, from: number, to: number, statistic: "a1" | "a7" | "01") {
+  const csv = await geodairExport(key, { date_debut: dateParameter(from), date_fin: dateParameter(to - 60000), type_donnee: statistic, famille_polluant: "2000", date_calcul: "true" });
+  return { records: parseGeodairArchive(csv, from, to), from, to, statistic, stationId: GEODAIR_STATION };
 }
 export async function loadGeodairHourly(key: string, now = Date.now()) {
   const to = Math.floor(now / HOUR) * HOUR, from = to - 7 * 24 * HOUR;

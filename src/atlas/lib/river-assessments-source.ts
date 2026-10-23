@@ -2,7 +2,7 @@ import type { RiverAssessment, RiverAssessments } from "./river-assessments";
 export const RIVER_EXPORT_URL = "https://www.rhone-mediterranee.eaufrance.fr/streams-quality-data/export-data-search";
 
 // Semicolon CSV, including quoted delimiters/newlines and escaped quotes.
-export function parseRiverCsv(csv: string, currentYear = new Date().getUTCFullYear()): Record<string, RiverAssessment> {
+export function parseRiverCsv(csv: string, currentYear = new Date().getUTCFullYear(), history?: RiverAssessment[]): Record<string, RiverAssessment> {
   const records: string[][] = [];
   let row: string[] = [], cell = "", quoted = false;
   for (let i = 0; i < csv.length; i++) {
@@ -29,8 +29,10 @@ export function parseRiverCsv(csv: string, currentYear = new Date().getUTCFullYe
     if (!get("annee")) continue;
     if (!Number.isInteger(year) || year < 1900 || year > currentYear) throw new Error("Année d’évaluation invalide.");
     if (stations[stationId]?.year === year) throw new Error("Évaluations contradictoires ou dupliquées.");
+    const assessment = { stationId, year, nature: get("nature_MDO"), ecological: get("ECO"), potential: get("POTENTIEL_ECOLO"), chemical: get("CHIM"), chemicalDowngraders: get("DECLASS_CHIM") };
+    history?.push(assessment);
     if (stations[stationId] && stations[stationId].year > year) continue;
-    stations[stationId] = { stationId, year, nature: get("nature_MDO"), ecological: get("ECO"), potential: get("POTENTIEL_ECOLO"), chemical: get("CHIM"), chemicalDowngraders: get("DECLASS_CHIM") };
+    stations[stationId] = assessment;
   }
   if (!Object.keys(stations).length) throw new Error("Export AERMC vide.");
   return stations;
@@ -44,7 +46,8 @@ export async function loadRiverAssessments(fetcher: typeof fetch = fetch): Promi
     if (!response.ok) throw new Error("Export indisponible.");
     const csv = await response.text();
     if (csv.length > 8_000_000) throw new Error("Export trop volumineux.");
-    return { stations: parseRiverCsv(csv), fetchedAt: new Date().toISOString() };
+    const history: RiverAssessment[] = [];
+    return { stations: parseRiverCsv(csv, new Date().getUTCFullYear(), history), history, fetchedAt: new Date().toISOString() };
   } catch {
     return { stations: {}, fetchedAt: null, error: "Évaluations AERMC indisponibles lors de la reconstruction du site. Les analyses Hub’Eau restent consultables ; les stations non évaluées sont affichées en contour." };
   }

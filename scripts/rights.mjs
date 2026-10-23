@@ -15,11 +15,11 @@ export const GEORISQUES_RIGHTS = {
 };
 const OPEN_LICENSE = { id: "etalab-2.0", url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/" };
 export function rightsForDataset(key) {
-  if (key === "atmo-index") return {
+  if (key === "atmo-index" || key === "atmo-index-history") return {
     license: ATMO_RIGHTS.license,
     attribution: "Source ATMO Auvergne - Rhône-Alpes : Indice communal de la qualité de l'air sur la région Auvergne - Rhône-Alpes",
     metadata: ["https://ids.craig.fr/geocat/srv/api/records/b3e869c1-82f7-4345-80d6-c80dba21c0ae/formatters/xml"],
-    transformations: "Extrait des dix communes CCPMB, de la veille au lendemain. Codes, couleurs et qualificatifs officiels conservés ; date d’échéance et date de diffusion distinctes. Pas de coordonnées communales utilisées pour les stations. Base dérivée sous ODbL 1.0. Prévision quotidienne communale, pas mesure ponctuelle aux stations.",
+    transformations: "Extrait des dix communes CCPMB. Historique séparé de la fenêtre courante. Codes, couleurs, dates d’échéance et de diffusion conservés. Base dérivée sous ODbL 1.0. Prévision quotidienne communale, pas mesure ponctuelle aux stations.",
   };
   if (key.startsWith("geodair-")) return {
     license: { id: "Licence-Ouverte", url: "https://www.geodair.fr/donnees/api#block-useragreementsblockforgeodairgp" },
@@ -28,11 +28,16 @@ export function rightsForDataset(key) {
     transformations: "Extrait de la station Passy FR33220. Horaires UTC normalisés en timestamps, unités normalisées, valeurs invalides conservées à null ; valeurs publiées et brutes, type de valeur, validité et qualité conservés séparément. Historique annuel et prélèvements différés distincts des mesures horaires. Dates de mesures et d’import conservées. Résultats susceptibles de révision. La version de la Licence Ouverte n’est pas précisée dans les CGU.",
   };
   if (key.startsWith("air-")) return ATMO_RIGHTS;
+  if (/^emissions(?:-\d{4})?$/.test(key)) return {
+    license: OPEN_LICENSE, attribution: 'Ministère de la Transition écologique · Géorisques / IREP',
+    metadata: ['https://www.georisques.gouv.fr/mentions-legales'],
+    transformations: 'Déclarations annuelles des établissements des dix communes CCPMB. Quantités, milieux, unités et mentions de seuil conservés. Années archivées séparément, sans assimiler émissions déclarées et concentrations mesurées.',
+  };
   if (key === "georisques") return GEORISQUES_RIGHTS;
   if (key.startsWith("atmo-model-")) return {
     license: ATMO_RIGHTS.license,
-    attribution: "Source ATMO Auvergne - Rhône-Alpes : Cartes annuelles 2025",
-    metadata: ["https://www.data.gouv.fr/datasets/cartes-annuelles-2025", "https://depot.atmo-aura.fr/modelisation/opendata_geotiff/2025/"],
+    attribution: "Source ATMO Auvergne - Rhône-Alpes : Cartes annuelles, édition et légende indiquées dans chaque export",
+    metadata: [`https://www.data.gouv.fr/datasets/cartes-annuelles-${key.match(/^atmo-model-history-(\d{4})-/)?.[1] ?? '2025'}`],
     transformations: "Rendu WMS EPSG:3857 à la palette officielle, limité à 4096 pixels sur le grand côté et masqué aux dix communes CCPMB. Image de présentation, pas une grille de concentrations numériques. Code et paramètres de transformation publiés ; base source sous ODbL 1.0.",
   };
   if (key === "cerema-light") return {

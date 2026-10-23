@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { rightsForDataset } from "./rights.mjs";
+import { archiveHistory, retainRevision } from "./history-archive.mjs";
 
 export const SCHEMA_VERSION = 1;
 export function contentHash(data) {
@@ -54,7 +55,7 @@ export async function openStore(directory, now = new Date().toISOString()) {
       }
       await persist();
     },
-    async update(key, source, intervalHours, loader, validate = () => {}) {
+    async update(key, source, intervalHours, loader, validate = () => {}, archiveField) {
       if (!/^[a-z0-9-]+$/.test(key)) throw new Error("Unsafe dataset key");
       const previous = manifest.datasets[key];
       try {
@@ -64,8 +65,12 @@ export async function openStore(directory, now = new Date().toISOString()) {
         const path = `data/${key}.json`;
         const rights = rightsForDataset(key);
         const existing = await readJson(join(directory, path), null);
-        if (previous?.hash !== hash || !existing || JSON.stringify(existing.license) !== JSON.stringify(rights.license)) {
-          await writeJson(join(directory, path), { schemaVersion: SCHEMA_VERSION, key, ...rights, data });
+        if (existing && previous?.hash) await retainRevision(directory, key, previous.hash, existing);
+        if (previous?.hash !== hash || !existing || !!existing.archive !== !!archiveField || JSON.stringify(existing.license) !== JSON.stringify(rights.license)) {
+          const payload = archiveField ? await archiveHistory(directory, key, data, archiveField) : { data };
+          const snapshot = { schemaVersion: SCHEMA_VERSION, key, ...rights, ...payload };
+          await retainRevision(directory, key, hash, snapshot);
+          await writeJson(join(directory, path), snapshot);
         }
         manifest.datasets[key] = { path, hash, source, ...rights, intervalHours, lastAttemptAt: now, lastPublishedAt: now, ...(partial ? { lastSuccessAt: previous?.lastSuccessAt, status: "error", error: "Import partiel. Résultats valides conservés ; certaines données restent indisponibles." } : { lastSuccessAt: now, status: "ok" }) };
         if (partial) failures++;

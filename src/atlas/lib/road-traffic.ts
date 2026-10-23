@@ -6,6 +6,7 @@ export type RoadPosition = [number, number]; // Latitude, longitude for Leaflet.
 export interface RoadTrafficSegment {
   id: string; road: TrafficRoad; name: string; paths: RoadPosition[][];
   vehicles: number | null; year: number; heavyVehiclesPercent: number | null; countingType: string; sourceId: string | null;
+  history?: { year: number; vehicles: number | null; heavyVehiclesPercent: number | null }[];
 }
 export interface RoadTrafficData { segments: RoadTrafficSegment[]; year: number | null; fetchedAt: string | null; error?: string }
 export const TRAFFIC_SOURCE_URL = "https://www.data.gouv.fr/datasets/trafic-routier-en-haute-savoie";

@@ -73,6 +73,33 @@ export function parseBathingPage(html: string, site: BathingSite, year: number):
   return dates.map((date, i) => ({ date, ecoli: ecoli[i], enterococci: entero[i], assessment: assessments.get(date) ?? "Non renseigné" }));
 }
 
+export function bathingYears(html: string, currentYear = new Date().getUTCFullYear()) {
+  const select = html.match(/<select\b[^>]*name=["']annee["'][^>]*>([\s\S]*?)<\/select>/i)?.[1];
+  if (!select) throw new Error("Catalogue des saisons absent");
+  const years = [...select.matchAll(/<option\b[^>]*value=["'](\d{4})["']/gi)].map(m => Number(m[1]));
+  if (!years.length || new Set(years).size !== years.length || years.some(y => y < 1900 || y > currentYear)) throw new Error("Catalogue des saisons invalide");
+  return years.sort((a, b) => b - a);
+}
+
+// Discover the available seasons from the provider instead of a rolling two-year
+// window. Previously archived seasons are retained by the importer if delisted.
+export async function loadBathingHistory(fetcher: typeof fetch = fetch, now = new Date()): Promise<BathingData> {
+  const points: BathingPoint[] = [];
+  for (const site of filterCcpmbPoints(BATHING_SITES)) {
+    const deadline = AbortSignal.timeout(600000), year = now.getUTCFullYear();
+    const html = await bathingHtml(bathingSourceUrl(site.id, year), fetcher, deadline);
+    if (!text(html).includes(site.officialName) || !html.includes(`isite=${site.id}`)) throw new Error("Site de baignade inattendu");
+    const seasons = [];
+    for (const seasonYear of bathingYears(html, year)) {
+      const sourceUrl = bathingSourceUrl(site.id, seasonYear);
+      const page = seasonYear === year ? html : await bathingHtml(sourceUrl, fetcher, deadline);
+      seasons.push({ year: seasonYear, sourceUrl, samples: parseBathingPage(page, site, seasonYear), fetchedAt: new Date().toISOString() });
+    }
+    points.push({ ...site, seasons });
+  }
+  return { points };
+}
+
 export async function loadBathingWater(fetcher: typeof fetch = fetch, now = new Date()): Promise<BathingData> {
   const year = now.getUTCFullYear();
   // Six verified local sites; at most three simultaneous requests. A failed year/site

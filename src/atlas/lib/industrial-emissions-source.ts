@@ -9,7 +9,7 @@ export const IREP_CATALOGUE_URL = "https://www.georisques.gouv.fr/webappReport/w
 const MAX_ARCHIVE = 20_000_000;
 const MAX_CSV = 25_000_000;
 
-export function latestIrepArchive(catalogue: unknown, currentYear = new Date().getUTCFullYear()) {
+export function irepArchives(catalogue: unknown, currentYear = new Date().getUTCFullYear()) {
   if (!catalogue || typeof catalogue !== "object" || !("annuel" in catalogue) || !catalogue.annuel || typeof catalogue.annuel !== "object") throw new Error("Catalogue IREP inattendu.");
   const candidates = Object.entries(catalogue.annuel).flatMap(([key, entry]) => {
     if (!/^20\d{2}$/.test(key) || Number(key) >= currentYear || !entry) return [];
@@ -19,8 +19,9 @@ export function latestIrepArchive(catalogue: unknown, currentYear = new Date().g
     return [{ year: Number(key), url }];
   }).sort((a, b) => b.year - a.year);
   if (!candidates.length) throw new Error("Aucune archive IREP publiée.");
-  return candidates[0];
+  return candidates;
 }
+export function latestIrepArchive(catalogue: unknown, currentYear = new Date().getUTCFullYear()) { return irepArchives(catalogue, currentYear)[0]; }
 
 function csv(bytes: Uint8Array, required: string[]): Record<string, string>[] {
   const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -95,6 +96,16 @@ async function boundedDownload(response: Response, maxBytes: number) {
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes;
+}
+
+export async function loadIrepCatalogue(fetcher: typeof fetch = fetch) {
+  return irepArchives(JSON.parse(new TextDecoder().decode(await boundedDownload(await fetcher(IREP_CATALOGUE_URL, { signal: AbortSignal.timeout(60000) }), 100_000))));
+}
+export async function loadIrepYear(year: number, fetcher: typeof fetch = fetch): Promise<IndustrialEmissionsData> {
+  if (!Number.isInteger(year) || year < 2003 || year >= new Date().getUTCFullYear()) throw new Error("Invalid IREP year");
+  const url = `https://files.georisques.fr/irep/${year}.zip`;
+  const bytes = await boundedDownload(await fetcher(url, { signal: AbortSignal.timeout(120000) }), MAX_ARCHIVE);
+  return { year, downloadUrl: url, fetchedAt: new Date().toISOString(), facilities: parseIrepArchive(bytes, year) };
 }
 
 export async function loadIndustrialEmissions(fetcher: typeof fetch = fetch): Promise<IndustrialEmissionsData> {

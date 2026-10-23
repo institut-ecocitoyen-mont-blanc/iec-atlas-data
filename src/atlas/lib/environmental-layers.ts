@@ -1,5 +1,6 @@
 import { INSTITUTE_DEMO_SOURCE } from "./institute-demo.ts";
 import { insideCcpmb } from "./ccpmb-territory.ts";
+import { loadHubeauCatalogue } from "./hubeau-history.ts";
 // Broad provider query envelope only; displayed data use the commune polygons.
 export const AREA = { west: 6.45, south: 45.7, east: 7.1, north: 46.1 };
 export type LayerId = "inventory" | "atmo" | "rivers" | "drinking" | "bathing" | "wood" | "traffic";
@@ -59,9 +60,8 @@ export function rows(value: unknown, key = "data"): Row[] {
 
 export async function loadLayer(id: RemoteLayerId, signal: AbortSignal): Promise<LayerPoint[]> {
   if (id === "rivers") {
-    const data = await fetchJson("https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/station_pc?code_departement=74&size=1000&fields=code_station,libelle_station,latitude,longitude,libelle_commune,date_maj_information", signal, 3);
-    if ((data as Row).next) throw new Error("Le catalogue dépasse la limite prévue. Les stations ne peuvent pas être affichées intégralement.");
-    return rows(data).flatMap((p) => {
+    const data = await loadHubeauCatalogue("https://hubeau.eaufrance.fr/api/v2/qualite_rivieres/station_pc?code_departement=74&size=1000", signal);
+    return data.flatMap((p) => {
       const lat = Number(p.latitude), lng = Number(p.longitude);
       return insideArea(lat, lng) ? [{ id: asText(p.code_station), name: asText(p.libelle_station), lat, lng, properties: p }] : [];
     });

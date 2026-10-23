@@ -1,5 +1,6 @@
 import { CCPMB_COMMUNES, insideCcpmb } from "./ccpmb-territory.ts";
 import { asText, fetchJson, rows, type Row } from "./environmental-layers.ts";
+import { loadWaterHistory } from "./hubeau-history.ts";
 
 export const GROUNDWATER_SOURCE = "https://hubeau.eaufrance.fr/page/api-qualite-nappes";
 const API = "https://hubeau.eaufrance.fr/api/v1/qualite_nappes";
@@ -13,6 +14,7 @@ export interface GroundwaterCatalogue { stations: GroundwaterStation[]; fetchedA
 export interface GroundwaterAnalysis {
   parameter: string; name: string; date: string; value: number | null; unit: string;
   remarkCode: number; remark: string; qualification: string; status: string; fraction: string;
+  source?: Row;
 }
 export interface GroundwaterResults { analyses: GroundwaterAnalysis[]; total: number; more: boolean }
 export function groundwaterCatalogueUrl(page = 1) {
@@ -48,20 +50,21 @@ export function parseGroundwaterStations(values: Row[]): GroundwaterStation[] {
 export function parseGroundwaterAnalyses(value: unknown, station: GroundwaterStation): GroundwaterResults {
   const data = rows(value);
   const envelope = value as Row;
-  if (!Array.isArray(envelope.data) || !Number.isInteger(envelope.count) || Number(envelope.count) < data.length || data.length > GROUNDWATER_RESULT_LIMIT || (data.length === 0 && (Number(envelope.count) > 0 || envelope.next))) throw new Error("Réponse d’analyses incomplète.");
+  if (!Array.isArray(envelope.data) || !Number.isInteger(envelope.count) || Number(envelope.count) < data.length || (data.length === 0 && (Number(envelope.count) > 0 || envelope.next))) throw new Error("Réponse d’analyses incomplète.");
   const analyses = data.map((row): GroundwaterAnalysis => {
     if (row.bss_id !== station.id || asText(row.code_insee_actuel) !== station.communeCode) throw new Error("Les analyses ne correspondent pas au point sélectionné.");
     const date = asText(row.date_debut_prelevement), parameter = asText(row.code_param);
     if (!date || !Number.isFinite(Date.parse(date)) || !parameter) throw new Error("Date ou paramètre d’analyse manquant.");
     if (row.resultat !== null && (typeof row.resultat !== "number" || !Number.isFinite(row.resultat))) throw new Error("Valeur d’analyse inattendue.");
     return { parameter, name: asText(row.nom_param) || `Paramètre ${parameter}`, date, value: row.resultat as number | null, unit: asText(row.symbole_unite) || asText(row.nom_unite),
-      remarkCode: typeof row.code_remarque_analyse === "number" ? row.code_remarque_analyse : -1, remark: asText(row.nom_remarque_analyse), qualification: asText(row.nom_qualification), status: asText(row.nom_statut_analyse), fraction: asText(row.nom_fraction),
+      remarkCode: typeof row.code_remarque_analyse === "number" ? row.code_remarque_analyse : -1, remark: asText(row.nom_remarque_analyse), qualification: asText(row.nom_qualification), status: asText(row.nom_statut_analyse), fraction: asText(row.nom_fraction), source: row,
     };
   }).sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
   return { analyses, total: Number(envelope.count), more: !!envelope.next || Number(envelope.count) > analyses.length };
 }
 export async function loadGroundwaterAnalyses(station: GroundwaterStation, signal: AbortSignal) {
-  return parseGroundwaterAnalyses(await fetchJson(groundwaterAnalysisUrl(station.id), signal, 2), station);
+  const data = await loadWaterHistory("groundwater", station.id, signal);
+  return parseGroundwaterAnalyses({ data, count: data.length, next: null }, station);
 }
 export function groundwaterResultLabel(analysis: GroundwaterAnalysis) {
   const { value, remarkCode } = analysis;
