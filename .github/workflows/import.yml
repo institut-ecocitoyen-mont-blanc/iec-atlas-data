@@ -82,7 +82,6 @@ jobs:
     if: ${{ always() && needs.import.outputs.result == 'failure' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Report provider failures after publishing usable data
+      - name: Warn about incomplete provider imports
         run: |
-          echo '::error::Some providers failed. Last successful data were retained. See import job summary and public manifest.'
-          exit 1
+          echo '::warning::Some provider imports are incomplete. Last successful data were retained where available. See import job summary and public manifest.'

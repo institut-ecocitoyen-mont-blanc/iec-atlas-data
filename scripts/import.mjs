@@ -151,5 +151,5 @@ if (process.env.GITHUB_STEP_SUMMARY) {
   const lines = Object.entries(store.manifest.datasets).filter(([, d]) => !d.retiredAt).map(([key, d]) => `| ${key} | ${d.status} | ${d.lastSuccessAt ?? "never"} |`);
   await appendFile(process.env.GITHUB_STEP_SUMMARY, `## Atlas import\n\n${failures} failed imports; previous successful snapshots retained.\n\n| Dataset | Status | Last successful import |\n|---|---|---|\n${lines.join("\n")}\n`);
 }
-// Publication must run even on provider failures; workflow reports failure afterwards.
+// Publication must run even on provider failures; workflow reports a warning afterwards.
 process.exitCode = failures ? 1 : 0;
