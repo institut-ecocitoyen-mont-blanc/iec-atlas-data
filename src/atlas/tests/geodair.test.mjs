@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { geodairTime, parseGeodairHourly, parseGeodairHistory, geodairExport } from "../lib/geodair-source.ts";
+import { geodairTime, parseGeodairHourly, parseGeodairHistory, geodairExport, loadGeodairHistory } from "../lib/geodair-source.ts";
 import { withGeodairStation, airReadingStatus, GEODAIR_POLLUTANTS } from "../lib/geodair.ts";
 import { airQuality } from "../lib/environmental-quality.ts";
 
@@ -71,4 +71,32 @@ test("missing key, forbidden response, empty export and unsafe job IDs never ret
     await assert.rejects(geodairExport("test-only", {}, async () => { calls++; return response; }));
     assert.equal(calls, 1);
   }
+});
+const annualRow = row({ Polluant: "PM10", "Date de début": "2025/01/01 00:00:00", "Date de fin": "2025/12/31 23:59:59", "type de valeur": "Moy. annuelle", valeur: "14.0", "valeur brute": "14.02", "couverture de données": "95.0" });
+const historyFetcher = (samples, requests = []) => async (url) => {
+  const params = new URL(url).searchParams;
+  if (url.includes("statistique/export")) { requests.push(params); return new Response(params.get("type_donnee") === "a7" ? "api_gp_annual" : "api_gp_samples"); }
+  return params.get("id") === "api_gp_annual" ? new Response(csv([annualRow])) : samples();
+};
+test("an empty BaP sample export is a valid empty series and keeps the annual import", async () => {
+  const header = Object.keys(annualRow).join(";");
+  for (const samples of [() => new Response(null, { status: 204 }), () => new Response(""), () => new Response(header)]) {
+    const history = await loadGeodairHistory("test-only", Date.parse("2027-01-15T10:30:00Z"), historyFetcher(samples));
+    assert.deepEqual(history.samples, []);
+    assert.equal(history.annual.length, 1); assert.equal(history.annual[0].pollutant, "pm10");
+  }
+  const outside = { ...annualRow, Polluant: "BaP in PM10", "Date de début": "2024/12/31 00:00:00", "Date de fin": "2025/01/01 00:00:00", "type de valeur": "Analyses différées", "unité de mesure": "ng/m3" };
+  assert.deepEqual(parseGeodairHistory(csv([outside]), "samples", Date.UTC(2025,0,1), from), []);
+  assert.throws(() => parseGeodairHistory("", "annual", Date.UTC(2013,0,1), from), /vide/);
+  assert.throws(() => parseGeodairHistory(header, "annual", Date.UTC(2013,0,1), from), /vide/);
+  assert.throws(() => parseGeodairHistory("<html>Error</html>", "samples", Date.UTC(2013,0,1), from), /Colonnes/);
+  // This importer maps HTTP 204 to an empty body: an empty annual export must still fail.
+  await assert.rejects(loadGeodairHistory("test-only", Date.parse("2027-01-15T10:30:00Z"), async (url) => url.includes("statistique/export") ? new Response("api_gp_annual") : new Response(null, { status: 204 })), /vide/);
+});
+test("in January the BaP window still covers the last published year", async () => {
+  const requests = [];
+  await loadGeodairHistory("test-only", Date.parse("2027-01-15T10:30:00Z"), historyFetcher(() => new Response(null, { status: 204 }), requests));
+  const samples = requests.find(params => params.get("type_donnee") === "01"), annual = requests.find(params => params.get("type_donnee") === "a7");
+  assert.equal(samples.get("date_debut"), "01/01/2025 00:00"); assert.equal(samples.get("date_fin"), "15/01/2027 10:00");
+  assert.equal(annual.get("date_debut"), "01/01/2013 00:00"); assert.equal(annual.get("date_fin"), "31/12/2026 23:59");
 });
