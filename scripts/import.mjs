@@ -1,7 +1,7 @@
 import { appendFile } from "node:fs/promises";
 import { acquireImportLock } from './import-lock.mjs';
 import { openStore, isDue, readJson } from "./store.mjs";
-import { fetchAllPollutionSites } from "../src/lib/google-sheets.ts";
+import { fetchAllPollutionSites, SPREADSHEET_URL } from "../src/lib/google-sheets.ts";
 import { clipAtlasInventory } from "../src/atlas/lib/atlas-inventory.ts";
 import { AREA, loadLayer, fetchJson, rows, analysisUrl } from "../src/atlas/lib/environmental-layers.ts";
 import { AIR_POLLUTANTS, ATMO_SERVICE, loadAirStations } from "../src/atlas/lib/atmo-stations.ts";
@@ -44,7 +44,7 @@ const upstreamFetch = globalThis.fetch;
 const runDeadline = AbortSignal.timeout(40 * 60000);
 globalThis.fetch = (url, init = {}) => upstreamFetch(url, { ...init, signal: AbortSignal.any([runDeadline, AbortSignal.timeout(60000), ...(init.signal ? [init.signal] : [])]) });
 
-await update("inventory", "hourly", 1, "https://docs.google.com/spreadsheets/d/1diIR2EXPf2QfkxUw-T0r3CRjinhcJVnnNH5azd0QxZg", async () => clipAtlasInventory(await fetchAllPollutionSites()), (data) => { valid(data); nonempty(data.sites); });
+await update("inventory", "hourly", 1, SPREADSHEET_URL, async () => clipAtlasInventory(await fetchAllPollutionSites()), (data) => { valid(data); nonempty(data.sites); });
 for (const { id } of AIR_POLLUTANTS) {
   await update(`air-${id}`, "hourly", 1, ATMO_SERVICE, () => loadAirStations(id, AREA, signal()), nonempty);
 }

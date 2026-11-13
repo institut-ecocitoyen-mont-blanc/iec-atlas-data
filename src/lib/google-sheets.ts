@@ -1,6 +1,9 @@
 // Fetch and parse pollution source data from the validated Google Sheet.
 
-const SPREADSHEET_ID = "1diIR2EXPf2QfkxUw-T0r3CRjinhcJVnnNH5azd0QxZg";
+const SPREADSHEET_ID = "1-vvHlxoPf0dseKQejHbG45_rzdEym9JDYJPqHQjHD80";
+// iec-atlas-data keeps a copy of this file and labels its snapshot with this
+// URL, so the atlas follows the site when the spreadsheet changes.
+export const SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}`;
 
 interface GoogleSheetsCell {
   v?: string | number | null;
@@ -27,7 +30,10 @@ export interface PollutionEntry {
 }
 
 export interface PollutionSiteBase {
+  /** Stable key for URLs: the sheet's source number, or a slug when it has none. */
   id: string;
+  /** The sheet's “Source” number (S001…), empty while not yet assigned. */
+  reference: string;
   name: string;
   commune: string;
   activity: string;
@@ -109,6 +115,19 @@ function normalizeHeader(value: string): string {
     .replace(/[’']/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function slugify(value: string): string {
+  return normalizeHeader(value).replace(/ /g, "-");
+}
+
+function uniqueId(candidate: string, usedIds: Set<string>): string {
+  let id = candidate;
+  for (let suffix = 2; usedIds.has(id); suffix += 1) {
+    id = `${candidate}-${suffix}`;
+  }
+  usedIds.add(id);
+  return id;
 }
 
 function findColumn(headers: string[], expectedHeader: string): number {
@@ -210,11 +229,14 @@ export async function fetchPollutionSites(): Promise<PollutionSite[]> {
 }
 
 export async function fetchAllPollutionSites(): Promise<PollutionSitesResult> {
-  const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json`;
+  // Keep every row: Google's header inference can consume source records too.
+  const url = `${SPREADSHEET_URL}/gviz/tq?tqx=out:json&gid=0&headers=0`;
 
-  const response = await fetch(url, {
-    next: { revalidate: 3600 },
-  });
+  // Next.js keeps build-time fetches in .next/cache (for a year by default),
+  // and Cloudflare restores that folder between builds: without a lifetime,
+  // every build would embed the same old copy of the sheet. A build refetches
+  // a stale entry before rendering, so each build embeds the sheet as it is now.
+  const response = await fetch(url, { next: { revalidate: 1 } });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch spreadsheet: ${response.status}`);
@@ -251,13 +273,22 @@ export async function fetchAllPollutionSites(): Promise<PollutionSitesResult> {
   const columns = getColumns(rows[headerRowIndex]);
   const sites: PollutionSite[] = [];
   const unmappedSites: UnmappedPollutionSite[] = [];
+  const usedIds = new Set<string>();
   let currentSite: PollutionSiteBase | null = null;
 
   for (const row of rows.slice(headerRowIndex + 1)) {
     const sourceId = getMeaningfulCellValue(row, columns.source);
+    const identification = getMeaningfulCellValue(row, columns.identification);
     const pollutionEntry = getPollutionEntry(row, columns);
 
-    if (sourceId) {
+    // A source starts on any row that names it, numbered or not; the rows
+    // below it with both cells empty add emissions to that source.
+    if (sourceId || identification) {
+      const commune = getMeaningfulCellValue(row, columns.commune);
+      const id = uniqueId(
+        sourceId || slugify(`${identification} ${commune}`) || "source",
+        usedIds,
+      );
       const latitude = getCellNumber(row, columns.latitude);
       const longitude = getCellNumber(row, columns.longitude);
       const hasValidCoordinates =
@@ -277,11 +308,10 @@ export async function fetchAllPollutionSites(): Promise<PollutionSitesResult> {
       );
 
       currentSite = {
-        id: sourceId,
-        name:
-          getMeaningfulCellValue(row, columns.identification) ||
-          "Source inconnue",
-        commune: getMeaningfulCellValue(row, columns.commune),
+        id,
+        reference: sourceId,
+        name: identification || "Source inconnue",
+        commune,
         activity: getMeaningfulCellValue(row, columns.activity),
         sector:
           getMeaningfulCellValue(row, columns.sector) || "Non spécifié",
